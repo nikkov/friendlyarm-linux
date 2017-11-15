@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 if LANTIQ
 
 config SOC_TYPE_XWAY

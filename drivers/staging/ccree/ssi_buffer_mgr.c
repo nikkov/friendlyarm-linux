@@ -33,10 +33,14 @@
 #include "ssi_hash.h"
 #include "ssi_aead.h"
 
+#ifdef CC_DEBUG
 #define GET_DMA_BUFFER_TYPE(buff_type) ( \
 	((buff_type) == SSI_DMA_BUF_NULL) ? "BUF_NULL" : \
 	((buff_type) == SSI_DMA_BUF_DLLI) ? "BUF_DLLI" : \
 	((buff_type) == SSI_DMA_BUF_MLLI) ? "BUF_MLLI" : "BUF_INVALID")
+#else
+#define GET_DMA_BUFFER_TYPE(buff_type)
+#endif
 
 enum dma_buffer_type {
 	DMA_NULL_TYPE = -1,
@@ -72,12 +76,16 @@ struct buffer_array {
  * @lbytes: [OUT] Returns the amount of bytes at the last entry
  */
 static unsigned int ssi_buffer_mgr_get_sgl_nents(
-	struct device *dev, struct scatterlist *sg_list,
-	unsigned int nbytes, u32 *lbytes, bool *is_chained)
+	struct scatterlist *sg_list, unsigned int nbytes, u32 *lbytes, bool *is_chained)
 {
 	unsigned int nents = 0;
 
 	while (nbytes != 0) {
+		if (sg_is_chain(sg_list)) {
+			SSI_LOG_ERR("Unexpected chained entry "
+				   "in sg (entry =0x%X)\n", nents);
+			BUG();
+		}
 		if (sg_list->length != 0) {
 			nents++;
 			/* get the number of bytes in the last entry */
@@ -90,7 +98,7 @@ static unsigned int ssi_buffer_mgr_get_sgl_nents(
 				*is_chained = true;
 		}
 	}
-	dev_dbg(dev, "nents %d last bytes %d\n", nents, *lbytes);
+	SSI_LOG_DEBUG("nents %d last bytes %d\n", nents, *lbytes);
 	return nents;
 }
 
@@ -126,20 +134,20 @@ void ssi_buffer_mgr_zero_sgl(struct scatterlist *sgl, u32 data_len)
  * @direct:
  */
 void ssi_buffer_mgr_copy_scatterlist_portion(
-	struct device *dev, u8 *dest,
-	struct scatterlist *sg, u32 to_skip,
-	u32 end, enum ssi_sg_cpy_direct direct)
+	u8 *dest, struct scatterlist *sg,
+	u32 to_skip,  u32 end,
+	enum ssi_sg_cpy_direct direct)
 {
 	u32 nents, lbytes;
 
-	nents = ssi_buffer_mgr_get_sgl_nents(dev, sg, end, &lbytes, NULL);
+	nents = ssi_buffer_mgr_get_sgl_nents(sg, end, &lbytes, NULL);
 	sg_copy_buffer(sg, nents, (void *)dest, (end - to_skip + 1), to_skip,
 		       (direct == SSI_SG_TO_BUF));
 }
 
 static inline int ssi_buffer_mgr_render_buff_to_mlli(
-	struct device *dev, dma_addr_t buff_dma, u32 buff_size,
-	u32 *curr_nents, u32 **mlli_entry_pp)
+	dma_addr_t buff_dma, u32 buff_size, u32 *curr_nents,
+	u32 **mlli_entry_pp)
 {
 	u32 *mlli_entry_p = *mlli_entry_pp;
 	u32 new_nents;
@@ -153,9 +161,9 @@ static inline int ssi_buffer_mgr_render_buff_to_mlli(
 	while (buff_size > CC_MAX_MLLI_ENTRY_SIZE) {
 		cc_lli_set_addr(mlli_entry_p, buff_dma);
 		cc_lli_set_size(mlli_entry_p, CC_MAX_MLLI_ENTRY_SIZE);
-		dev_dbg(dev, "entry[%d]: single_buff=0x%08X size=%08X\n",
-			*curr_nents, mlli_entry_p[LLI_WORD0_OFFSET],
-			mlli_entry_p[LLI_WORD1_OFFSET]);
+		SSI_LOG_DEBUG("entry[%d]: single_buff=0x%08X size=%08X\n", *curr_nents,
+			      mlli_entry_p[LLI_WORD0_OFFSET],
+			      mlli_entry_p[LLI_WORD1_OFFSET]);
 		buff_dma += CC_MAX_MLLI_ENTRY_SIZE;
 		buff_size -= CC_MAX_MLLI_ENTRY_SIZE;
 		mlli_entry_p = mlli_entry_p + 2;
@@ -164,9 +172,9 @@ static inline int ssi_buffer_mgr_render_buff_to_mlli(
 	/*Last entry */
 	cc_lli_set_addr(mlli_entry_p, buff_dma);
 	cc_lli_set_size(mlli_entry_p, buff_size);
-	dev_dbg(dev, "entry[%d]: single_buff=0x%08X size=%08X\n",
-		*curr_nents, mlli_entry_p[LLI_WORD0_OFFSET],
-		mlli_entry_p[LLI_WORD1_OFFSET]);
+	SSI_LOG_DEBUG("entry[%d]: single_buff=0x%08X size=%08X\n", *curr_nents,
+		      mlli_entry_p[LLI_WORD0_OFFSET],
+		      mlli_entry_p[LLI_WORD1_OFFSET]);
 	mlli_entry_p = mlli_entry_p + 2;
 	*mlli_entry_pp = mlli_entry_p;
 	(*curr_nents)++;
@@ -174,9 +182,8 @@ static inline int ssi_buffer_mgr_render_buff_to_mlli(
 }
 
 static inline int ssi_buffer_mgr_render_scatterlist_to_mlli(
-	struct device *dev, struct scatterlist *sgl,
-	u32 sgl_data_len, u32 sgl_offset, u32 *curr_nents,
-	u32 **mlli_entry_pp)
+	struct scatterlist *sgl, u32 sgl_data_len, u32 sgl_offset,
+	u32 *curr_nents, u32 **mlli_entry_pp)
 {
 	struct scatterlist *curr_sgl = sgl;
 	u32 *mlli_entry_p = *mlli_entry_pp;
@@ -190,8 +197,8 @@ static inline int ssi_buffer_mgr_render_scatterlist_to_mlli(
 				sgl_data_len;
 		sgl_data_len -= entry_data_len;
 		rc = ssi_buffer_mgr_render_buff_to_mlli(
-			dev, sg_dma_address(curr_sgl) + sgl_offset,
-			entry_data_len, curr_nents, &mlli_entry_p);
+			sg_dma_address(curr_sgl) + sgl_offset, entry_data_len,
+			curr_nents, &mlli_entry_p);
 		if (rc != 0)
 			return rc;
 
@@ -210,14 +217,14 @@ static int ssi_buffer_mgr_generate_mlli(
 	u32 total_nents = 0, prev_total_nents = 0;
 	int rc = 0, i;
 
-	dev_dbg(dev, "NUM of SG's = %d\n", sg_data->num_of_buffers);
+	SSI_LOG_DEBUG("NUM of SG's = %d\n", sg_data->num_of_buffers);
 
 	/* Allocate memory from the pointed pool */
 	mlli_params->mlli_virt_addr = dma_pool_alloc(
 			mlli_params->curr_pool, GFP_KERNEL,
 			&mlli_params->mlli_dma_addr);
 	if (unlikely(!mlli_params->mlli_virt_addr)) {
-		dev_err(dev, "dma_pool_alloc() failed\n");
+		SSI_LOG_ERR("dma_pool_alloc() failed\n");
 		rc = -ENOMEM;
 		goto build_mlli_exit;
 	}
@@ -227,12 +234,12 @@ static int ssi_buffer_mgr_generate_mlli(
 	for (i = 0; i < sg_data->num_of_buffers; i++) {
 		if (sg_data->type[i] == DMA_SGL_TYPE)
 			rc = ssi_buffer_mgr_render_scatterlist_to_mlli(
-				dev, sg_data->entry[i].sgl,
-				sg_data->total_data_len[i], sg_data->offset[i],
-				&total_nents, &mlli_p);
+				sg_data->entry[i].sgl,
+				sg_data->total_data_len[i], sg_data->offset[i], &total_nents,
+				&mlli_p);
 		else /*DMA_BUFF_TYPE*/
 			rc = ssi_buffer_mgr_render_buff_to_mlli(
-				dev, sg_data->entry[i].buffer_dma,
+				sg_data->entry[i].buffer_dma,
 				sg_data->total_data_len[i], &total_nents,
 				&mlli_p);
 		if (rc != 0)
@@ -252,23 +259,26 @@ static int ssi_buffer_mgr_generate_mlli(
 	/* Set MLLI size for the bypass operation */
 	mlli_params->mlli_len = (total_nents * LLI_ENTRY_BYTE_SIZE);
 
-	dev_dbg(dev, "MLLI params: virt_addr=%pK dma_addr=%pad mlli_len=0x%X\n",
-		mlli_params->mlli_virt_addr, &mlli_params->mlli_dma_addr,
-		mlli_params->mlli_len);
+	SSI_LOG_DEBUG("MLLI params: "
+		     "virt_addr=%pK dma_addr=%pad mlli_len=0x%X\n",
+		   mlli_params->mlli_virt_addr,
+		   mlli_params->mlli_dma_addr,
+		   mlli_params->mlli_len);
 
 build_mlli_exit:
 	return rc;
 }
 
 static inline void ssi_buffer_mgr_add_buffer_entry(
-	struct device *dev, struct buffer_array *sgl_data,
+	struct buffer_array *sgl_data,
 	dma_addr_t buffer_dma, unsigned int buffer_len,
 	bool is_last_entry, u32 *mlli_nents)
 {
 	unsigned int index = sgl_data->num_of_buffers;
 
-	dev_dbg(dev, "index=%u single_buff=%pad buffer_len=0x%08X is_last=%d\n",
-		index, &buffer_dma, buffer_len, is_last_entry);
+	SSI_LOG_DEBUG("index=%u single_buff=%pad "
+		     "buffer_len=0x%08X is_last=%d\n",
+		     index, buffer_dma, buffer_len, is_last_entry);
 	sgl_data->nents[index] = 1;
 	sgl_data->entry[index].buffer_dma = buffer_dma;
 	sgl_data->offset[index] = 0;
@@ -282,7 +292,6 @@ static inline void ssi_buffer_mgr_add_buffer_entry(
 }
 
 static inline void ssi_buffer_mgr_add_scatterlist_entry(
-	struct device *dev,
 	struct buffer_array *sgl_data,
 	unsigned int nents,
 	struct scatterlist *sgl,
@@ -293,8 +302,8 @@ static inline void ssi_buffer_mgr_add_scatterlist_entry(
 {
 	unsigned int index = sgl_data->num_of_buffers;
 
-	dev_dbg(dev, "index=%u nents=%u sgl=%pK data_len=0x%08X is_last=%d\n",
-		index, nents, sgl, data_len, is_last_table);
+	SSI_LOG_DEBUG("index=%u nents=%u sgl=%pK data_len=0x%08X is_last=%d\n",
+		      index, nents, sgl, data_len, is_last_table);
 	sgl_data->nents[index] = nents;
 	sgl_data->entry[index].sgl = sgl;
 	sgl_data->offset[index] = data_offset;
@@ -318,7 +327,7 @@ ssi_buffer_mgr_dma_map_sg(struct device *dev, struct scatterlist *sg, u32 nents,
 		if (!l_sg)
 			break;
 		if (unlikely(dma_map_sg(dev, l_sg, 1, direction) != 1)) {
-			dev_err(dev, "dma_map_page() sg buffer failed\n");
+			SSI_LOG_ERR("dma_map_page() sg buffer failed\n");
 			goto err;
 		}
 		l_sg = sg_next(l_sg);
@@ -347,22 +356,26 @@ static int ssi_buffer_mgr_map_scatterlist(
 	if (sg_is_last(sg)) {
 		/* One entry only case -set to DLLI */
 		if (unlikely(dma_map_sg(dev, sg, 1, direction) != 1)) {
-			dev_err(dev, "dma_map_sg() single buffer failed\n");
+			SSI_LOG_ERR("dma_map_sg() single buffer failed\n");
 			return -ENOMEM;
 		}
-		dev_dbg(dev, "Mapped sg: dma_address=%pad page=%p addr=%pK offset=%u length=%u\n",
-			&sg_dma_address(sg), sg_page(sg), sg_virt(sg),
-			sg->offset, sg->length);
+		SSI_LOG_DEBUG("Mapped sg: dma_address=%pad "
+			     "page=%p addr=%pK offset=%u "
+			     "length=%u\n",
+			     sg_dma_address(sg),
+			     sg_page(sg),
+			     sg_virt(sg),
+			     sg->offset, sg->length);
 		*lbytes = nbytes;
 		*nents = 1;
 		*mapped_nents = 1;
 	} else {  /*sg_is_last*/
-		*nents = ssi_buffer_mgr_get_sgl_nents(dev, sg, nbytes, lbytes,
+		*nents = ssi_buffer_mgr_get_sgl_nents(sg, nbytes, lbytes,
 						      &is_chained);
 		if (*nents > max_sg_nents) {
 			*nents = 0;
-			dev_err(dev, "Too many fragments. current %d max %d\n",
-				*nents, max_sg_nents);
+			SSI_LOG_ERR("Too many fragments. current %d max %d\n",
+				    *nents, max_sg_nents);
 			return -ENOMEM;
 		}
 		if (!is_chained) {
@@ -372,7 +385,7 @@ static int ssi_buffer_mgr_map_scatterlist(
 			*mapped_nents = dma_map_sg(dev, sg, *nents, direction);
 			if (unlikely(*mapped_nents == 0)) {
 				*nents = 0;
-				dev_err(dev, "dma_map_sg() sg buffer failed\n");
+				SSI_LOG_ERR("dma_map_sg() sg buffer failed\n");
 				return -ENOMEM;
 			}
 		} else {
@@ -385,7 +398,7 @@ static int ssi_buffer_mgr_map_scatterlist(
 								  direction);
 			if (unlikely(*mapped_nents != *nents)) {
 				*nents = *mapped_nents;
-				dev_err(dev, "dma_map_sg() sg buffer failed\n");
+				SSI_LOG_ERR("dma_map_sg() sg buffer failed\n");
 				return -ENOMEM;
 			}
 		}
@@ -401,22 +414,26 @@ ssi_aead_handle_config_buf(struct device *dev,
 			   struct buffer_array *sg_data,
 			   unsigned int assoclen)
 {
-	dev_dbg(dev, " handle additional data config set to DLLI\n");
+	SSI_LOG_DEBUG(" handle additional data config set to   DLLI\n");
 	/* create sg for the current buffer */
 	sg_init_one(&areq_ctx->ccm_adata_sg, config_data, AES_BLOCK_SIZE + areq_ctx->ccm_hdr_size);
 	if (unlikely(dma_map_sg(dev, &areq_ctx->ccm_adata_sg, 1,
 				DMA_TO_DEVICE) != 1)) {
-		dev_err(dev, "dma_map_sg() config buffer failed\n");
-		return -ENOMEM;
+			SSI_LOG_ERR("dma_map_sg() "
+			   "config buffer failed\n");
+			return -ENOMEM;
 	}
-	dev_dbg(dev, "Mapped curr_buff: dma_address=%pad page=%p addr=%pK offset=%u length=%u\n",
-		&sg_dma_address(&areq_ctx->ccm_adata_sg),
-		sg_page(&areq_ctx->ccm_adata_sg),
-		sg_virt(&areq_ctx->ccm_adata_sg),
-		areq_ctx->ccm_adata_sg.offset, areq_ctx->ccm_adata_sg.length);
+	SSI_LOG_DEBUG("Mapped curr_buff: dma_address=%pad "
+		     "page=%p addr=%pK "
+		     "offset=%u length=%u\n",
+		     sg_dma_address(&areq_ctx->ccm_adata_sg),
+		     sg_page(&areq_ctx->ccm_adata_sg),
+		     sg_virt(&areq_ctx->ccm_adata_sg),
+		     areq_ctx->ccm_adata_sg.offset,
+		     areq_ctx->ccm_adata_sg.length);
 	/* prepare for case of MLLI */
 	if (assoclen > 0) {
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data, 1,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data, 1,
 						     &areq_ctx->ccm_adata_sg,
 						     (AES_BLOCK_SIZE + areq_ctx->ccm_hdr_size),
 						     0, false, NULL);
@@ -430,23 +447,28 @@ static inline int ssi_ahash_handle_curr_buf(struct device *dev,
 					    u32 curr_buff_cnt,
 					    struct buffer_array *sg_data)
 {
-	dev_dbg(dev, " handle curr buff %x set to   DLLI\n", curr_buff_cnt);
+	SSI_LOG_DEBUG(" handle curr buff %x set to   DLLI\n", curr_buff_cnt);
 	/* create sg for the current buffer */
 	sg_init_one(areq_ctx->buff_sg, curr_buff, curr_buff_cnt);
 	if (unlikely(dma_map_sg(dev, areq_ctx->buff_sg, 1,
 				DMA_TO_DEVICE) != 1)) {
-		dev_err(dev, "dma_map_sg() src buffer failed\n");
-		return -ENOMEM;
+			SSI_LOG_ERR("dma_map_sg() "
+			   "src buffer failed\n");
+			return -ENOMEM;
 	}
-	dev_dbg(dev, "Mapped curr_buff: dma_address=%pad page=%p addr=%pK offset=%u length=%u\n",
-		&sg_dma_address(areq_ctx->buff_sg), sg_page(areq_ctx->buff_sg),
-		sg_virt(areq_ctx->buff_sg), areq_ctx->buff_sg->offset,
-		areq_ctx->buff_sg->length);
+	SSI_LOG_DEBUG("Mapped curr_buff: dma_address=%pad "
+		     "page=%p addr=%pK "
+		     "offset=%u length=%u\n",
+		     sg_dma_address(areq_ctx->buff_sg),
+		     sg_page(areq_ctx->buff_sg),
+		     sg_virt(areq_ctx->buff_sg),
+		     areq_ctx->buff_sg->offset,
+		     areq_ctx->buff_sg->length);
 	areq_ctx->data_dma_buf_type = SSI_DMA_BUF_DLLI;
 	areq_ctx->curr_sg = areq_ctx->buff_sg;
 	areq_ctx->in_nents = 0;
 	/* prepare for case of MLLI */
-	ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data, 1, areq_ctx->buff_sg,
+	ssi_buffer_mgr_add_scatterlist_entry(sg_data, 1, areq_ctx->buff_sg,
 					     curr_buff_cnt, 0, false, NULL);
 	return 0;
 }
@@ -461,8 +483,9 @@ void ssi_buffer_mgr_unmap_blkcipher_request(
 	struct blkcipher_req_ctx *req_ctx = (struct blkcipher_req_ctx *)ctx;
 
 	if (likely(req_ctx->gen_ctx.iv_dma_addr != 0)) {
-		dev_dbg(dev, "Unmapped iv: iv_dma_addr=%pad iv_size=%u\n",
-			&req_ctx->gen_ctx.iv_dma_addr, ivsize);
+		SSI_LOG_DEBUG("Unmapped iv: iv_dma_addr=%pad iv_size=%u\n",
+			      req_ctx->gen_ctx.iv_dma_addr,
+			      ivsize);
 		dma_unmap_single(dev, req_ctx->gen_ctx.iv_dma_addr,
 				 ivsize,
 				 req_ctx->is_giv ? DMA_BIDIRECTIONAL :
@@ -476,11 +499,11 @@ void ssi_buffer_mgr_unmap_blkcipher_request(
 	}
 
 	dma_unmap_sg(dev, src, req_ctx->in_nents, DMA_BIDIRECTIONAL);
-	dev_dbg(dev, "Unmapped req->src=%pK\n", sg_virt(src));
+	SSI_LOG_DEBUG("Unmapped req->src=%pK\n", sg_virt(src));
 
 	if (src != dst) {
 		dma_unmap_sg(dev, dst, req_ctx->out_nents, DMA_BIDIRECTIONAL);
-		dev_dbg(dev, "Unmapped req->dst=%pK\n", sg_virt(dst));
+		SSI_LOG_DEBUG("Unmapped req->dst=%pK\n", sg_virt(dst));
 	}
 }
 
@@ -496,7 +519,7 @@ int ssi_buffer_mgr_map_blkcipher_request(
 	struct blkcipher_req_ctx *req_ctx = (struct blkcipher_req_ctx *)ctx;
 	struct mlli_params *mlli_params = &req_ctx->mlli_params;
 	struct buff_mgr_handle *buff_mgr = drvdata->buff_mgr_handle;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	struct buffer_array sg_data;
 	u32 dummy = 0;
 	int rc = 0;
@@ -516,12 +539,13 @@ int ssi_buffer_mgr_map_blkcipher_request(
 				       DMA_TO_DEVICE);
 		if (unlikely(dma_mapping_error(dev,
 					       req_ctx->gen_ctx.iv_dma_addr))) {
-			dev_err(dev, "Mapping iv %u B at va=%pK for DMA failed\n",
-				ivsize, info);
+			SSI_LOG_ERR("Mapping iv %u B at va=%pK "
+				   "for DMA failed\n", ivsize, info);
 			return -ENOMEM;
 		}
-		dev_dbg(dev, "Mapped iv %u B at va=%pK to dma=%pad\n",
-			ivsize, info, &req_ctx->gen_ctx.iv_dma_addr);
+		SSI_LOG_DEBUG("Mapped iv %u B at va=%pK to dma=%pad\n",
+			      ivsize, info,
+			      req_ctx->gen_ctx.iv_dma_addr);
 	} else {
 		req_ctx->gen_ctx.iv_dma_addr = 0;
 	}
@@ -543,7 +567,7 @@ int ssi_buffer_mgr_map_blkcipher_request(
 		/* Handle inplace operation */
 		if (unlikely(req_ctx->dma_buf_type == SSI_DMA_BUF_MLLI)) {
 			req_ctx->out_nents = 0;
-			ssi_buffer_mgr_add_scatterlist_entry(dev, &sg_data,
+			ssi_buffer_mgr_add_scatterlist_entry(&sg_data,
 							     req_ctx->in_nents,
 							     src, nbytes, 0,
 							     true,
@@ -563,12 +587,12 @@ int ssi_buffer_mgr_map_blkcipher_request(
 			req_ctx->dma_buf_type = SSI_DMA_BUF_MLLI;
 
 		if (unlikely((req_ctx->dma_buf_type == SSI_DMA_BUF_MLLI))) {
-			ssi_buffer_mgr_add_scatterlist_entry(dev, &sg_data,
+			ssi_buffer_mgr_add_scatterlist_entry(&sg_data,
 							     req_ctx->in_nents,
 							     src, nbytes, 0,
 							     true,
 							     &req_ctx->in_mlli_nents);
-			ssi_buffer_mgr_add_scatterlist_entry(dev, &sg_data,
+			ssi_buffer_mgr_add_scatterlist_entry(&sg_data,
 							     req_ctx->out_nents,
 							     dst, nbytes, 0,
 							     true,
@@ -583,8 +607,8 @@ int ssi_buffer_mgr_map_blkcipher_request(
 			goto ablkcipher_exit;
 	}
 
-	dev_dbg(dev, "areq_ctx->dma_buf_type = %s\n",
-		GET_DMA_BUFFER_TYPE(req_ctx->dma_buf_type));
+	SSI_LOG_DEBUG("areq_ctx->dma_buf_type = %s\n",
+		      GET_DMA_BUFFER_TYPE(req_ctx->dma_buf_type));
 
 	return 0;
 
@@ -650,34 +674,30 @@ void ssi_buffer_mgr_unmap_aead_request(
 	 *allocated and should be released
 	 */
 	if (areq_ctx->mlli_params.curr_pool) {
-		dev_dbg(dev, "free MLLI buffer: dma=%pad virt=%pK\n",
-			&areq_ctx->mlli_params.mlli_dma_addr,
-			areq_ctx->mlli_params.mlli_virt_addr);
+		SSI_LOG_DEBUG("free MLLI buffer: dma=%pad virt=%pK\n",
+			      areq_ctx->mlli_params.mlli_dma_addr,
+			      areq_ctx->mlli_params.mlli_virt_addr);
 		dma_pool_free(areq_ctx->mlli_params.curr_pool,
 			      areq_ctx->mlli_params.mlli_virt_addr,
 			      areq_ctx->mlli_params.mlli_dma_addr);
 	}
 
-	dev_dbg(dev, "Unmapping src sgl: req->src=%pK areq_ctx->src.nents=%u areq_ctx->assoc.nents=%u assoclen:%u cryptlen=%u\n",
-		sg_virt(req->src), areq_ctx->src.nents, areq_ctx->assoc.nents,
-		req->assoclen, req->cryptlen);
+	SSI_LOG_DEBUG("Unmapping src sgl: req->src=%pK areq_ctx->src.nents=%u areq_ctx->assoc.nents=%u assoclen:%u cryptlen=%u\n", sg_virt(req->src), areq_ctx->src.nents, areq_ctx->assoc.nents, req->assoclen, req->cryptlen);
 	size_to_unmap = req->assoclen + req->cryptlen;
 	if (areq_ctx->gen_ctx.op_type == DRV_CRYPTO_DIRECTION_ENCRYPT)
 		size_to_unmap += areq_ctx->req_authsize;
 	if (areq_ctx->is_gcm4543)
 		size_to_unmap += crypto_aead_ivsize(tfm);
 
-	dma_unmap_sg(dev, req->src,
-		     ssi_buffer_mgr_get_sgl_nents(dev, req->src, size_to_unmap,
-						  &dummy, &chained),
-		     DMA_BIDIRECTIONAL);
+	dma_unmap_sg(dev, req->src, ssi_buffer_mgr_get_sgl_nents(req->src, size_to_unmap, &dummy, &chained), DMA_BIDIRECTIONAL);
 	if (unlikely(req->src != req->dst)) {
-		dev_dbg(dev, "Unmapping dst sgl: req->dst=%pK\n",
-			sg_virt(req->dst));
+		SSI_LOG_DEBUG("Unmapping dst sgl: req->dst=%pK\n",
+			      sg_virt(req->dst));
 		dma_unmap_sg(dev, req->dst,
-			     ssi_buffer_mgr_get_sgl_nents(dev, req->dst,
+			     ssi_buffer_mgr_get_sgl_nents(req->dst,
 							  size_to_unmap,
-							  &dummy, &chained),
+							  &dummy,
+							  &chained),
 			     DMA_BIDIRECTIONAL);
 	}
 	if (drvdata->coherent &&
@@ -692,14 +712,13 @@ void ssi_buffer_mgr_unmap_aead_request(
 		 * data memory overriding that caused by cache coherence problem.
 		 */
 		ssi_buffer_mgr_copy_scatterlist_portion(
-			dev, areq_ctx->backup_mac, req->src,
+			areq_ctx->backup_mac, req->src,
 			size_to_skip + req->cryptlen - areq_ctx->req_authsize,
 			size_to_skip + req->cryptlen, SSI_SG_FROM_BUF);
 	}
 }
 
 static inline int ssi_buffer_mgr_get_aead_icv_nents(
-	struct device *dev,
 	struct scatterlist *sgl,
 	unsigned int sgl_nents,
 	unsigned int authsize,
@@ -738,12 +757,12 @@ static inline int ssi_buffer_mgr_get_aead_icv_nents(
 		nents = 2;
 		*is_icv_fragmented = true;
 	} else {
-		dev_err(dev, "Unsupported num. of ICV fragments (> %d)\n",
-			MAX_ICV_NENTS_SUPPORTED);
+		SSI_LOG_ERR("Unsupported num. of ICV fragments (> %d)\n",
+			    MAX_ICV_NENTS_SUPPORTED);
 		nents = -1; /*unsupported*/
 	}
-	dev_dbg(dev, "is_frag=%s icv_nents=%u\n",
-		(*is_icv_fragmented ? "true" : "false"), nents);
+	SSI_LOG_DEBUG("is_frag=%s icv_nents=%u\n",
+		      (*is_icv_fragmented ? "true" : "false"), nents);
 
 	return nents;
 }
@@ -756,7 +775,7 @@ static inline int ssi_buffer_mgr_aead_chain_iv(
 {
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
 	unsigned int hw_iv_size = areq_ctx->hw_iv_size;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	int rc = 0;
 
 	if (unlikely(!req->iv)) {
@@ -767,22 +786,22 @@ static inline int ssi_buffer_mgr_aead_chain_iv(
 	areq_ctx->gen_ctx.iv_dma_addr = dma_map_single(dev, req->iv, hw_iv_size,
 						       DMA_BIDIRECTIONAL);
 	if (unlikely(dma_mapping_error(dev, areq_ctx->gen_ctx.iv_dma_addr))) {
-		dev_err(dev, "Mapping iv %u B at va=%pK for DMA failed\n",
-			hw_iv_size, req->iv);
+		SSI_LOG_ERR("Mapping iv %u B at va=%pK for DMA failed\n",
+			    hw_iv_size, req->iv);
 		rc = -ENOMEM;
 		goto chain_iv_exit;
 	}
 
-	dev_dbg(dev, "Mapped iv %u B at va=%pK to dma=%pad\n",
-		hw_iv_size, req->iv, &areq_ctx->gen_ctx.iv_dma_addr);
+	SSI_LOG_DEBUG("Mapped iv %u B at va=%pK to dma=%pad\n",
+		      hw_iv_size, req->iv,
+		      areq_ctx->gen_ctx.iv_dma_addr);
 	if (do_chain && areq_ctx->plaintext_authenticate_only) {  // TODO: what about CTR?? ask Ron
 		struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 		unsigned int iv_size_to_authenc = crypto_aead_ivsize(tfm);
 		unsigned int iv_ofs = GCM_BLOCK_RFC4_IV_OFFSET;
 		/* Chain to given list */
 		ssi_buffer_mgr_add_buffer_entry(
-			dev, sg_data,
-			areq_ctx->gen_ctx.iv_dma_addr + iv_ofs,
+			sg_data, areq_ctx->gen_ctx.iv_dma_addr + iv_ofs,
 			iv_size_to_authenc, is_last,
 			&areq_ctx->assoc.mlli_nents);
 		areq_ctx->assoc_buff_type = SSI_DMA_BUF_MLLI;
@@ -805,7 +824,6 @@ static inline int ssi_buffer_mgr_aead_chain_assoc(
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	unsigned int sg_index = 0;
 	u32 size_of_assoc = req->assoclen;
-	struct device *dev = drvdata_to_dev(drvdata);
 
 	if (areq_ctx->is_gcm4543)
 		size_of_assoc += crypto_aead_ivsize(tfm);
@@ -819,9 +837,9 @@ static inline int ssi_buffer_mgr_aead_chain_assoc(
 		areq_ctx->assoc_buff_type = SSI_DMA_BUF_NULL;
 		areq_ctx->assoc.nents = 0;
 		areq_ctx->assoc.mlli_nents = 0;
-		dev_dbg(dev, "Chain assoc of length 0: buff_type=%s nents=%u\n",
-			GET_DMA_BUFFER_TYPE(areq_ctx->assoc_buff_type),
-			areq_ctx->assoc.nents);
+		SSI_LOG_DEBUG("Chain assoc of length 0: buff_type=%s nents=%u\n",
+			      GET_DMA_BUFFER_TYPE(areq_ctx->assoc_buff_type),
+			      areq_ctx->assoc.nents);
 		goto chain_assoc_exit;
 	}
 
@@ -835,16 +853,16 @@ static inline int ssi_buffer_mgr_aead_chain_assoc(
 			current_sg = sg_next(current_sg);
 			//if have reached the end of the sgl, then this is unexpected
 			if (!current_sg) {
-				dev_err(dev, "reached end of sg list. unexpected\n");
-				return -EINVAL;
+				SSI_LOG_ERR("reached end of sg list. unexpected\n");
+				BUG();
 			}
 			sg_index += current_sg->length;
 			mapped_nents++;
 		}
 	}
 	if (unlikely(mapped_nents > LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES)) {
-		dev_err(dev, "Too many fragments. current %d max %d\n",
-			mapped_nents, LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES);
+		SSI_LOG_ERR("Too many fragments. current %d max %d\n",
+			    mapped_nents, LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES);
 		return -ENOMEM;
 	}
 	areq_ctx->assoc.nents = mapped_nents;
@@ -855,9 +873,9 @@ static inline int ssi_buffer_mgr_aead_chain_assoc(
 	if (areq_ctx->ccm_hdr_size != ccm_header_size_null) {
 		if (unlikely((mapped_nents + 1) >
 			LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES)) {
-			dev_err(dev, "CCM case.Too many fragments. Current %d max %d\n",
-				(areq_ctx->assoc.nents + 1),
-				LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES);
+			SSI_LOG_ERR("CCM case.Too many fragments. Current %d max %d\n",
+				    (areq_ctx->assoc.nents + 1),
+				    LLI_MAX_NUM_OF_ASSOC_DATA_ENTRIES);
 			rc = -ENOMEM;
 			goto chain_assoc_exit;
 		}
@@ -871,11 +889,11 @@ static inline int ssi_buffer_mgr_aead_chain_assoc(
 
 	if (unlikely((do_chain) ||
 		     (areq_ctx->assoc_buff_type == SSI_DMA_BUF_MLLI))) {
-		dev_dbg(dev, "Chain assoc: buff_type=%s nents=%u\n",
-			GET_DMA_BUFFER_TYPE(areq_ctx->assoc_buff_type),
-			areq_ctx->assoc.nents);
+		SSI_LOG_DEBUG("Chain assoc: buff_type=%s nents=%u\n",
+			      GET_DMA_BUFFER_TYPE(areq_ctx->assoc_buff_type),
+			      areq_ctx->assoc.nents);
 		ssi_buffer_mgr_add_scatterlist_entry(
-			dev, sg_data, areq_ctx->assoc.nents,
+			sg_data, areq_ctx->assoc.nents,
 			req->src, req->assoclen, 0, is_last,
 			&areq_ctx->assoc.mlli_nents);
 		areq_ctx->assoc_buff_type = SSI_DMA_BUF_MLLI;
@@ -933,11 +951,10 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 	unsigned int authsize = areq_ctx->req_authsize;
 	int rc = 0, icv_nents;
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct device *dev = drvdata_to_dev(drvdata);
 
 	if (likely(req->src == req->dst)) {
 		/*INPLACE*/
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data,
 						     areq_ctx->src.nents,
 						     areq_ctx->src_sgl,
 						     areq_ctx->cryptlen,
@@ -945,8 +962,7 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 						     is_last_table,
 						     &areq_ctx->src.mlli_nents);
 
-		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(dev,
-							      areq_ctx->src_sgl,
+		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(areq_ctx->src_sgl,
 							      areq_ctx->src.nents,
 							      authsize,
 							      *src_last_bytes,
@@ -974,8 +990,7 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 						skip += crypto_aead_ivsize(tfm);
 
 					ssi_buffer_mgr_copy_scatterlist_portion(
-						dev, areq_ctx->backup_mac,
-						req->src,
+						areq_ctx->backup_mac, req->src,
 						(skip + req->cryptlen -
 						 areq_ctx->req_authsize),
 						skip + req->cryptlen,
@@ -998,14 +1013,14 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 
 	} else if (direct == DRV_CRYPTO_DIRECTION_DECRYPT) {
 		/*NON-INPLACE and DECRYPT*/
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data,
 						     areq_ctx->src.nents,
 						     areq_ctx->src_sgl,
 						     areq_ctx->cryptlen,
 						     areq_ctx->src_offset,
 						     is_last_table,
 						     &areq_ctx->src.mlli_nents);
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data,
 						     areq_ctx->dst.nents,
 						     areq_ctx->dst_sgl,
 						     areq_ctx->cryptlen,
@@ -1013,8 +1028,7 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 						     is_last_table,
 						     &areq_ctx->dst.mlli_nents);
 
-		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(dev,
-							      areq_ctx->src_sgl,
+		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(areq_ctx->src_sgl,
 							      areq_ctx->src.nents,
 							      authsize,
 							      *src_last_bytes,
@@ -1029,15 +1043,15 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 			 * verification is made by CPU compare in order to simplify
 			 * MAC verification upon request completion
 			 */
-			u32 size_to_skip = req->assoclen;
+			  u32 size_to_skip = req->assoclen;
 
-			if (areq_ctx->is_gcm4543)
-				size_to_skip += crypto_aead_ivsize(tfm);
+			  if (areq_ctx->is_gcm4543)
+				  size_to_skip += crypto_aead_ivsize(tfm);
 
-			ssi_buffer_mgr_copy_scatterlist_portion(
-				dev, areq_ctx->backup_mac, req->src,
-				size_to_skip + req->cryptlen - areq_ctx->req_authsize,
-				size_to_skip + req->cryptlen, SSI_SG_TO_BUF);
+			  ssi_buffer_mgr_copy_scatterlist_portion(
+				  areq_ctx->backup_mac, req->src,
+				  size_to_skip + req->cryptlen - areq_ctx->req_authsize,
+				  size_to_skip + req->cryptlen, SSI_SG_TO_BUF);
 			areq_ctx->icv_virt_addr = areq_ctx->backup_mac;
 		} else { /* Contig. ICV */
 			/*Should hanlde if the sg is not contig.*/
@@ -1051,14 +1065,14 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 
 	} else {
 		/*NON-INPLACE and ENCRYPT*/
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data,
 						     areq_ctx->dst.nents,
 						     areq_ctx->dst_sgl,
 						     areq_ctx->cryptlen,
 						     areq_ctx->dst_offset,
 						     is_last_table,
 						     &areq_ctx->dst.mlli_nents);
-		ssi_buffer_mgr_add_scatterlist_entry(dev, sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(sg_data,
 						     areq_ctx->src.nents,
 						     areq_ctx->src_sgl,
 						     areq_ctx->cryptlen,
@@ -1066,8 +1080,7 @@ static inline int ssi_buffer_mgr_prepare_aead_data_mlli(
 						     is_last_table,
 						     &areq_ctx->src.mlli_nents);
 
-		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(dev,
-							      areq_ctx->dst_sgl,
+		icv_nents = ssi_buffer_mgr_get_aead_icv_nents(areq_ctx->dst_sgl,
 							      areq_ctx->dst.nents,
 							      authsize,
 							      *dst_last_bytes,
@@ -1102,7 +1115,7 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 	bool is_last_table, bool do_chain)
 {
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	enum drv_crypto_direction direct = areq_ctx->gen_ctx.op_type;
 	unsigned int authsize = areq_ctx->req_authsize;
 	int src_last_bytes = 0, dst_last_bytes = 0;
@@ -1121,9 +1134,10 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 
 	offset = size_to_skip;
 
-	if (!sg_data)
-		return -EINVAL;
-
+	if (!sg_data) {
+		rc = -EINVAL;
+		goto chain_data_exit;
+	}
 	areq_ctx->src_sgl = req->src;
 	areq_ctx->dst_sgl = req->dst;
 
@@ -1131,10 +1145,7 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 		size_for_map += crypto_aead_ivsize(tfm);
 
 	size_for_map += (direct == DRV_CRYPTO_DIRECTION_ENCRYPT) ? authsize : 0;
-	src_mapped_nents = ssi_buffer_mgr_get_sgl_nents(dev, req->src,
-							size_for_map,
-							&src_last_bytes,
-							&chained);
+	src_mapped_nents = ssi_buffer_mgr_get_sgl_nents(req->src, size_for_map, &src_last_bytes, &chained);
 	sg_index = areq_ctx->src_sgl->length;
 	//check where the data starts
 	while (sg_index <= size_to_skip) {
@@ -1142,15 +1153,15 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 		areq_ctx->src_sgl = sg_next(areq_ctx->src_sgl);
 		//if have reached the end of the sgl, then this is unexpected
 		if (!areq_ctx->src_sgl) {
-			dev_err(dev, "reached end of sg list. unexpected\n");
-			return -EINVAL;
+			SSI_LOG_ERR("reached end of sg list. unexpected\n");
+			BUG();
 		}
 		sg_index += areq_ctx->src_sgl->length;
 		src_mapped_nents--;
 	}
 	if (unlikely(src_mapped_nents > LLI_MAX_NUM_OF_DATA_ENTRIES)) {
-		dev_err(dev, "Too many fragments. current %d max %d\n",
-			src_mapped_nents, LLI_MAX_NUM_OF_DATA_ENTRIES);
+		SSI_LOG_ERR("Too many fragments. current %d max %d\n",
+			    src_mapped_nents, LLI_MAX_NUM_OF_DATA_ENTRIES);
 			return -ENOMEM;
 	}
 
@@ -1176,10 +1187,7 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 		}
 	}
 
-	dst_mapped_nents = ssi_buffer_mgr_get_sgl_nents(dev, req->dst,
-							size_for_map,
-							&dst_last_bytes,
-							&chained);
+	dst_mapped_nents = ssi_buffer_mgr_get_sgl_nents(req->dst, size_for_map, &dst_last_bytes, &chained);
 	sg_index = areq_ctx->dst_sgl->length;
 	offset = size_to_skip;
 
@@ -1189,15 +1197,15 @@ static inline int ssi_buffer_mgr_aead_chain_data(
 		areq_ctx->dst_sgl = sg_next(areq_ctx->dst_sgl);
 		//if have reached the end of the sgl, then this is unexpected
 		if (!areq_ctx->dst_sgl) {
-			dev_err(dev, "reached end of sg list. unexpected\n");
-			return -EINVAL;
+			SSI_LOG_ERR("reached end of sg list. unexpected\n");
+			BUG();
 		}
 		sg_index += areq_ctx->dst_sgl->length;
 		dst_mapped_nents--;
 	}
 	if (unlikely(dst_mapped_nents > LLI_MAX_NUM_OF_DATA_ENTRIES)) {
-		dev_err(dev, "Too many fragments. current %d max %d\n",
-			dst_mapped_nents, LLI_MAX_NUM_OF_DATA_ENTRIES);
+		SSI_LOG_ERR("Too many fragments. current %d max %d\n",
+			    dst_mapped_nents, LLI_MAX_NUM_OF_DATA_ENTRIES);
 		return -ENOMEM;
 	}
 	areq_ctx->dst.nents = dst_mapped_nents;
@@ -1277,7 +1285,7 @@ int ssi_buffer_mgr_map_aead_request(
 {
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
 	struct mlli_params *mlli_params = &areq_ctx->mlli_params;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	struct buffer_array sg_data;
 	unsigned int authsize = areq_ctx->req_authsize;
 	struct buff_mgr_handle *buff_mgr = drvdata->buff_mgr_handle;
@@ -1304,7 +1312,7 @@ int ssi_buffer_mgr_map_aead_request(
 		 * data memory overriding that caused by cache coherence problem.
 		 */
 		ssi_buffer_mgr_copy_scatterlist_portion(
-			dev, areq_ctx->backup_mac, req->src,
+			areq_ctx->backup_mac, req->src,
 			size_to_skip + req->cryptlen - areq_ctx->req_authsize,
 			size_to_skip + req->cryptlen, SSI_SG_TO_BUF);
 	}
@@ -1319,8 +1327,8 @@ int ssi_buffer_mgr_map_aead_request(
 						    MAX_MAC_SIZE,
 						    DMA_BIDIRECTIONAL);
 	if (unlikely(dma_mapping_error(dev, areq_ctx->mac_buf_dma_addr))) {
-		dev_err(dev, "Mapping mac_buf %u B at va=%pK for DMA failed\n",
-			MAX_MAC_SIZE, areq_ctx->mac_buf);
+		SSI_LOG_ERR("Mapping mac_buf %u B at va=%pK for DMA failed\n",
+			    MAX_MAC_SIZE, areq_ctx->mac_buf);
 		rc = -ENOMEM;
 		goto aead_map_failure;
 	}
@@ -1332,10 +1340,9 @@ int ssi_buffer_mgr_map_aead_request(
 							    DMA_TO_DEVICE);
 
 		if (unlikely(dma_mapping_error(dev, areq_ctx->ccm_iv0_dma_addr))) {
-			dev_err(dev, "Mapping mac_buf %u B at va=%pK for DMA failed\n",
-				AES_BLOCK_SIZE,
-				(areq_ctx->ccm_config +
-				 CCM_CTR_COUNT_0_OFFSET));
+			SSI_LOG_ERR("Mapping mac_buf %u B at va=%pK "
+			"for DMA failed\n", AES_BLOCK_SIZE,
+			(areq_ctx->ccm_config + CCM_CTR_COUNT_0_OFFSET));
 			areq_ctx->ccm_iv0_dma_addr = 0;
 			rc = -ENOMEM;
 			goto aead_map_failure;
@@ -1355,8 +1362,8 @@ int ssi_buffer_mgr_map_aead_request(
 							 AES_BLOCK_SIZE,
 							 DMA_BIDIRECTIONAL);
 		if (unlikely(dma_mapping_error(dev, areq_ctx->hkey_dma_addr))) {
-			dev_err(dev, "Mapping hkey %u B at va=%pK for DMA failed\n",
-				AES_BLOCK_SIZE, areq_ctx->hkey);
+			SSI_LOG_ERR("Mapping hkey %u B at va=%pK for DMA failed\n",
+				    AES_BLOCK_SIZE, areq_ctx->hkey);
 			rc = -ENOMEM;
 			goto aead_map_failure;
 		}
@@ -1366,8 +1373,8 @@ int ssi_buffer_mgr_map_aead_request(
 								  AES_BLOCK_SIZE,
 								  DMA_TO_DEVICE);
 		if (unlikely(dma_mapping_error(dev, areq_ctx->gcm_block_len_dma_addr))) {
-			dev_err(dev, "Mapping gcm_len_block %u B at va=%pK for DMA failed\n",
-				AES_BLOCK_SIZE, &areq_ctx->gcm_len_block);
+			SSI_LOG_ERR("Mapping gcm_len_block %u B at va=%pK for DMA failed\n",
+				    AES_BLOCK_SIZE, &areq_ctx->gcm_len_block);
 			rc = -ENOMEM;
 			goto aead_map_failure;
 		}
@@ -1378,8 +1385,9 @@ int ssi_buffer_mgr_map_aead_request(
 								DMA_TO_DEVICE);
 
 		if (unlikely(dma_mapping_error(dev, areq_ctx->gcm_iv_inc1_dma_addr))) {
-			dev_err(dev, "Mapping gcm_iv_inc1 %u B at va=%pK for DMA failed\n",
-				AES_BLOCK_SIZE, (areq_ctx->gcm_iv_inc1));
+			SSI_LOG_ERR("Mapping gcm_iv_inc1 %u B at va=%pK "
+			"for DMA failed\n", AES_BLOCK_SIZE,
+			(areq_ctx->gcm_iv_inc1));
 			areq_ctx->gcm_iv_inc1_dma_addr = 0;
 			rc = -ENOMEM;
 			goto aead_map_failure;
@@ -1391,8 +1399,9 @@ int ssi_buffer_mgr_map_aead_request(
 								DMA_TO_DEVICE);
 
 		if (unlikely(dma_mapping_error(dev, areq_ctx->gcm_iv_inc2_dma_addr))) {
-			dev_err(dev, "Mapping gcm_iv_inc2 %u B at va=%pK for DMA failed\n",
-				AES_BLOCK_SIZE, (areq_ctx->gcm_iv_inc2));
+			SSI_LOG_ERR("Mapping gcm_iv_inc2 %u B at va=%pK "
+			"for DMA failed\n", AES_BLOCK_SIZE,
+			(areq_ctx->gcm_iv_inc2));
 			areq_ctx->gcm_iv_inc2_dma_addr = 0;
 			rc = -ENOMEM;
 			goto aead_map_failure;
@@ -1472,10 +1481,9 @@ int ssi_buffer_mgr_map_aead_request(
 			goto aead_map_failure;
 
 		ssi_buffer_mgr_update_aead_mlli_nents(drvdata, req);
-		dev_dbg(dev, "assoc params mn %d\n",
-			areq_ctx->assoc.mlli_nents);
-		dev_dbg(dev, "src params mn %d\n", areq_ctx->src.mlli_nents);
-		dev_dbg(dev, "dst params mn %d\n", areq_ctx->dst.mlli_nents);
+		SSI_LOG_DEBUG("assoc params mn %d\n", areq_ctx->assoc.mlli_nents);
+		SSI_LOG_DEBUG("src params mn %d\n", areq_ctx->src.mlli_nents);
+		SSI_LOG_DEBUG("dst params mn %d\n", areq_ctx->dst.mlli_nents);
 	}
 	return 0;
 
@@ -1488,7 +1496,7 @@ int ssi_buffer_mgr_map_hash_request_final(
 	struct ssi_drvdata *drvdata, void *ctx, struct scatterlist *src, unsigned int nbytes, bool do_update)
 {
 	struct ahash_req_ctx *areq_ctx = (struct ahash_req_ctx *)ctx;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	u8 *curr_buff = areq_ctx->buff_index ? areq_ctx->buff1 :
 			areq_ctx->buff0;
 	u32 *curr_buff_cnt = areq_ctx->buff_index ? &areq_ctx->buff1_cnt :
@@ -1499,8 +1507,11 @@ int ssi_buffer_mgr_map_hash_request_final(
 	u32 dummy = 0;
 	u32 mapped_nents = 0;
 
-	dev_dbg(dev, "final params : curr_buff=%pK curr_buff_cnt=0x%X nbytes = 0x%X src=%pK curr_index=%u\n",
-		curr_buff, *curr_buff_cnt, nbytes, src, areq_ctx->buff_index);
+	SSI_LOG_DEBUG(" final params : curr_buff=%pK "
+		     "curr_buff_cnt=0x%X nbytes = 0x%X "
+		     "src=%pK curr_index=%u\n",
+		     curr_buff, *curr_buff_cnt, nbytes,
+		     src, areq_ctx->buff_index);
 	/* Init the type of the dma buffer */
 	areq_ctx->data_dma_buf_type = SSI_DMA_BUF_NULL;
 	mlli_params->curr_pool = NULL;
@@ -1546,7 +1557,7 @@ int ssi_buffer_mgr_map_hash_request_final(
 	if (unlikely(areq_ctx->data_dma_buf_type == SSI_DMA_BUF_MLLI)) {
 		mlli_params->curr_pool = buff_mgr->mlli_buffs_pool;
 		/* add the src data to the sg_data */
-		ssi_buffer_mgr_add_scatterlist_entry(dev, &sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(&sg_data,
 						     areq_ctx->in_nents,
 						     src, nbytes, 0, true,
 						     &areq_ctx->mlli_nents);
@@ -1557,8 +1568,8 @@ int ssi_buffer_mgr_map_hash_request_final(
 	}
 	/* change the buffer index for the unmap function */
 	areq_ctx->buff_index = (areq_ctx->buff_index ^ 1);
-	dev_dbg(dev, "areq_ctx->data_dma_buf_type = %s\n",
-		GET_DMA_BUFFER_TYPE(areq_ctx->data_dma_buf_type));
+	SSI_LOG_DEBUG("areq_ctx->data_dma_buf_type = %s\n",
+		      GET_DMA_BUFFER_TYPE(areq_ctx->data_dma_buf_type));
 	return 0;
 
 fail_unmap_din:
@@ -1575,7 +1586,7 @@ int ssi_buffer_mgr_map_hash_request_update(
 	struct ssi_drvdata *drvdata, void *ctx, struct scatterlist *src, unsigned int nbytes, unsigned int block_size)
 {
 	struct ahash_req_ctx *areq_ctx = (struct ahash_req_ctx *)ctx;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 	u8 *curr_buff = areq_ctx->buff_index ? areq_ctx->buff1 :
 			areq_ctx->buff0;
 	u32 *curr_buff_cnt = areq_ctx->buff_index ? &areq_ctx->buff1_cnt :
@@ -1593,8 +1604,11 @@ int ssi_buffer_mgr_map_hash_request_update(
 	u32 dummy = 0;
 	u32 mapped_nents = 0;
 
-	dev_dbg(dev, " update params : curr_buff=%pK curr_buff_cnt=0x%X nbytes=0x%X src=%pK curr_index=%u\n",
-		curr_buff, *curr_buff_cnt, nbytes, src, areq_ctx->buff_index);
+	SSI_LOG_DEBUG(" update params : curr_buff=%pK "
+		     "curr_buff_cnt=0x%X nbytes=0x%X "
+		     "src=%pK curr_index=%u\n",
+		     curr_buff, *curr_buff_cnt, nbytes,
+		     src, areq_ctx->buff_index);
 	/* Init the type of the dma buffer */
 	areq_ctx->data_dma_buf_type = SSI_DMA_BUF_NULL;
 	mlli_params->curr_pool = NULL;
@@ -1603,11 +1617,14 @@ int ssi_buffer_mgr_map_hash_request_update(
 	areq_ctx->in_nents = 0;
 
 	if (unlikely(total_in_len < block_size)) {
-		dev_dbg(dev, " less than one block: curr_buff=%pK *curr_buff_cnt=0x%X copy_to=%pK\n",
-			curr_buff, *curr_buff_cnt, &curr_buff[*curr_buff_cnt]);
+		SSI_LOG_DEBUG(" less than one block: curr_buff=%pK "
+			     "*curr_buff_cnt=0x%X copy_to=%pK\n",
+			curr_buff, *curr_buff_cnt,
+			&curr_buff[*curr_buff_cnt]);
 		areq_ctx->in_nents =
-			ssi_buffer_mgr_get_sgl_nents(dev, src, nbytes, &dummy,
-						     NULL);
+			ssi_buffer_mgr_get_sgl_nents(src,
+						     nbytes,
+						     &dummy, NULL);
 		sg_copy_to_buffer(src, areq_ctx->in_nents,
 				  &curr_buff[*curr_buff_cnt], nbytes);
 		*curr_buff_cnt += nbytes;
@@ -1619,15 +1636,17 @@ int ssi_buffer_mgr_map_hash_request_update(
 	/* update data len */
 	update_data_len = total_in_len - *next_buff_cnt;
 
-	dev_dbg(dev, " temp length : *next_buff_cnt=0x%X update_data_len=0x%X\n",
+	SSI_LOG_DEBUG(" temp length : *next_buff_cnt=0x%X "
+		     "update_data_len=0x%X\n",
 		*next_buff_cnt, update_data_len);
 
 	/* Copy the new residue to next buffer */
 	if (*next_buff_cnt != 0) {
-		dev_dbg(dev, " handle residue: next buff %pK skip data %u residue %u\n",
-			next_buff, (update_data_len - *curr_buff_cnt),
-			*next_buff_cnt);
-		ssi_buffer_mgr_copy_scatterlist_portion(dev, next_buff, src,
+		SSI_LOG_DEBUG(" handle residue: next buff %pK skip data %u"
+			     " residue %u\n", next_buff,
+			     (update_data_len - *curr_buff_cnt),
+			     *next_buff_cnt);
+		ssi_buffer_mgr_copy_scatterlist_portion(next_buff, src,
 							(update_data_len - *curr_buff_cnt),
 							nbytes, SSI_SG_TO_BUF);
 		/* change the buffer index for next operation */
@@ -1669,7 +1688,7 @@ int ssi_buffer_mgr_map_hash_request_update(
 	if (unlikely(areq_ctx->data_dma_buf_type == SSI_DMA_BUF_MLLI)) {
 		mlli_params->curr_pool = buff_mgr->mlli_buffs_pool;
 		/* add the src data to the sg_data */
-		ssi_buffer_mgr_add_scatterlist_entry(dev, &sg_data,
+		ssi_buffer_mgr_add_scatterlist_entry(&sg_data,
 						     areq_ctx->in_nents,
 						     src,
 						     (update_data_len - *curr_buff_cnt),
@@ -1706,26 +1725,29 @@ void ssi_buffer_mgr_unmap_hash_request(
 	 *allocated and should be released
 	 */
 	if (areq_ctx->mlli_params.curr_pool) {
-		dev_dbg(dev, "free MLLI buffer: dma=%pad virt=%pK\n",
-			&areq_ctx->mlli_params.mlli_dma_addr,
-			areq_ctx->mlli_params.mlli_virt_addr);
+		SSI_LOG_DEBUG("free MLLI buffer: dma=%pad virt=%pK\n",
+			      areq_ctx->mlli_params.mlli_dma_addr,
+			      areq_ctx->mlli_params.mlli_virt_addr);
 		dma_pool_free(areq_ctx->mlli_params.curr_pool,
 			      areq_ctx->mlli_params.mlli_virt_addr,
 			      areq_ctx->mlli_params.mlli_dma_addr);
 	}
 
 	if ((src) && likely(areq_ctx->in_nents != 0)) {
-		dev_dbg(dev, "Unmapped sg src: virt=%pK dma=%pad len=0x%X\n",
-			sg_virt(src), &sg_dma_address(src), sg_dma_len(src));
+		SSI_LOG_DEBUG("Unmapped sg src: virt=%pK dma=%pad len=0x%X\n",
+			      sg_virt(src),
+			      sg_dma_address(src),
+			      sg_dma_len(src));
 		dma_unmap_sg(dev, src,
 			     areq_ctx->in_nents, DMA_TO_DEVICE);
 	}
 
 	if (*prev_len != 0) {
-		dev_dbg(dev, "Unmapped buffer: areq_ctx->buff_sg=%pK dma=%pad len 0x%X\n",
-			sg_virt(areq_ctx->buff_sg),
-			&sg_dma_address(areq_ctx->buff_sg),
-			sg_dma_len(areq_ctx->buff_sg));
+		SSI_LOG_DEBUG("Unmapped buffer: areq_ctx->buff_sg=%pK"
+			     " dma=%pad len 0x%X\n",
+				sg_virt(areq_ctx->buff_sg),
+				sg_dma_address(areq_ctx->buff_sg),
+				sg_dma_len(areq_ctx->buff_sg));
 		dma_unmap_sg(dev, areq_ctx->buff_sg, 1, DMA_TO_DEVICE);
 		if (!do_revert) {
 			/* clean the previous data length for update operation */
@@ -1739,7 +1761,7 @@ void ssi_buffer_mgr_unmap_hash_request(
 int ssi_buffer_mgr_init(struct ssi_drvdata *drvdata)
 {
 	struct buff_mgr_handle *buff_mgr_handle;
-	struct device *dev = drvdata_to_dev(drvdata);
+	struct device *dev = &drvdata->plat_dev->dev;
 
 	buff_mgr_handle = kmalloc(sizeof(*buff_mgr_handle), GFP_KERNEL);
 	if (!buff_mgr_handle)

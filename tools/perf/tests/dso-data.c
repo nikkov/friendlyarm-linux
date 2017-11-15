@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <dirent.h>
 #include <stdlib.h>
 #include <linux/kernel.h>

@@ -823,7 +823,7 @@ static int bnx2fc_net_config(struct fc_lport *lport, struct net_device *netdev)
 
 	skb_queue_head_init(&port->fcoe_pending_queue);
 	port->fcoe_pending_queue_active = 0;
-	timer_setup(&port->timer, fcoe_queue_timer, 0);
+	setup_timer(&port->timer, fcoe_queue_timer, (unsigned long) lport);
 
 	fcoe_link_speed_update(lport);
 
@@ -845,9 +845,9 @@ static int bnx2fc_net_config(struct fc_lport *lport, struct net_device *netdev)
 	return 0;
 }
 
-static void bnx2fc_destroy_timer(struct timer_list *t)
+static void bnx2fc_destroy_timer(unsigned long data)
 {
-	struct bnx2fc_hba *hba = from_timer(hba, t, destroy_timer);
+	struct bnx2fc_hba *hba = (struct bnx2fc_hba *)data;
 
 	printk(KERN_ERR PFX "ERROR:bnx2fc_destroy_timer - "
 	       "Destroy compl not received!!\n");
@@ -1946,10 +1946,11 @@ static void bnx2fc_fw_destroy(struct bnx2fc_hba *hba)
 {
 	if (test_and_clear_bit(BNX2FC_FLAG_FW_INIT_DONE, &hba->flags)) {
 		if (bnx2fc_send_fw_fcoe_destroy_msg(hba) == 0) {
-			timer_setup(&hba->destroy_timer, bnx2fc_destroy_timer,
-				    0);
+			init_timer(&hba->destroy_timer);
 			hba->destroy_timer.expires = BNX2FC_FW_TIMEOUT +
 								jiffies;
+			hba->destroy_timer.function = bnx2fc_destroy_timer;
+			hba->destroy_timer.data = (unsigned long)hba;
 			add_timer(&hba->destroy_timer);
 			wait_event_interruptible(hba->destroy_wait,
 					test_bit(BNX2FC_FLAG_DESTROY_CMPL,

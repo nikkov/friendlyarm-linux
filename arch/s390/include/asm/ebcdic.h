@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *    EBCDIC -> ASCII, ASCII -> EBCDIC conversion routines.
  *

@@ -26,7 +26,6 @@
 #include <linux/init.h>
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
-#include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
@@ -1142,13 +1141,10 @@ static int elan_probe(struct i2c_client *client,
 		return error;
 
 	/*
-	 * Platform code (ACPI, DTS) should normally set up interrupt
-	 * for us, but in case it did not let's fall back to using falling
-	 * edge to be compatible with older Chromebooks.
+	 * Systems using device tree should set up interrupt via DTS,
+	 * the rest will use the default falling edge interrupts.
 	 */
-	irqflags = irq_get_trigger_type(client->irq);
-	if (!irqflags)
-		irqflags = IRQF_TRIGGER_FALLING;
+	irqflags = dev->of_node ? 0 : IRQF_TRIGGER_FALLING;
 
 	error = devm_request_threaded_irq(dev, client->irq, NULL, elan_isr,
 					  irqflags | IRQF_ONESHOT,
@@ -1259,10 +1255,9 @@ static const struct acpi_device_id elan_acpi_id[] = {
 	{ "ELAN0602", 0 },
 	{ "ELAN0605", 0 },
 	{ "ELAN0608", 0 },
+	{ "ELAN0605", 0 },
 	{ "ELAN0609", 0 },
 	{ "ELAN060B", 0 },
-	{ "ELAN060C", 0 },
-	{ "ELAN0611", 0 },
 	{ "ELAN1000", 0 },
 	{ }
 };

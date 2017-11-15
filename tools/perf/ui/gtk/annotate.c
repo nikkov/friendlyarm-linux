@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "gtk.h"
 #include "util/debug.h"
 #include "util/annotate.h"

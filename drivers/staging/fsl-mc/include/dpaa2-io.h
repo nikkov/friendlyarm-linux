@@ -54,8 +54,6 @@ struct device;
  * for dequeue.
  */
 
-#define DPAA2_IO_ANY_CPU	-1
-
 /**
  * struct dpaa2_io_desc - The DPIO descriptor
  * @receives_notifications: Use notificaton mode. Non-zero if the DPIO
@@ -93,8 +91,8 @@ irqreturn_t dpaa2_io_irq(struct dpaa2_io *obj);
  * @cb:           The callback to be invoked when the notification arrives
  * @is_cdan:      Zero for FQDAN, non-zero for CDAN
  * @id:           FQID or channel ID, needed for rearm
- * @desired_cpu:  The cpu on which the notifications will show up. Use
- *                DPAA2_IO_ANY_CPU if don't care
+ * @desired_cpu:  The cpu on which the notifications will show up. -1 means
+ *                any CPU.
  * @dpio_id:      The dpio index
  * @qman64:       The 64-bit context value shows up in the FQDAN/CDAN.
  * @node:         The list node

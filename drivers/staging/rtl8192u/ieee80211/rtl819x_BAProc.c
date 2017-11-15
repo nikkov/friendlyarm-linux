@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /********************************************************************************************************************************
  * This file is created to process BA Action Frame. According to 802.11 spec, there are 3 BA action types at all. And as BA is
  * related to TS, this part need some structure defined in QOS side code. Also TX RX is going to be resturctured, so how to send
@@ -144,7 +143,7 @@ static struct sk_buff *ieee80211_ADDBA(struct ieee80211_device *ieee, u8 *Dst, P
 
 	if (ACT_ADDBARSP == type) {
 		// Status Code
-		netdev_info(ieee->dev, "=====>to send ADDBARSP\n");
+		printk(KERN_INFO "=====>to send ADDBARSP\n");
 
 		put_unaligned_le16(StatusCode, tag);
 		tag += 2;
@@ -346,7 +345,7 @@ int ieee80211_rx_ADDBAReq(struct ieee80211_device *ieee, struct sk_buff *skb)
 	pBaTimeoutVal = (u16 *)(tag + 5);
 	pBaStartSeqCtrl = (PSEQUENCE_CONTROL)(req + 7);
 
-	netdev_info(ieee->dev, "====================>rx ADDBAREQ from :%pM\n", dst);
+	printk(KERN_INFO "====================>rx ADDBAREQ from :%pM\n", dst);
 //some other capability is not ready now.
 	if ((ieee->current_network.qos_data.active == 0) ||
 		(!ieee->pHTInfo->bCurrentHTSupport)) //||
@@ -673,18 +672,18 @@ TsInitDelBA( struct ieee80211_device *ieee, PTS_COMMON_INFO pTsCommonInfo, TR_SE
  *  return:  NULL
  *  notice:
  ********************************************************************************************************************/
-void BaSetupTimeOut(struct timer_list *t)
+void BaSetupTimeOut(unsigned long data)
 {
-	PTX_TS_RECORD	pTxTs = from_timer(pTxTs, t, TxPendingBARecord.Timer);
+	PTX_TS_RECORD	pTxTs = (PTX_TS_RECORD)data;
 
 	pTxTs->bAddBaReqInProgress = false;
 	pTxTs->bAddBaReqDelayed = true;
 	pTxTs->TxPendingBARecord.bValid = false;
 }
 
-void TxBaInactTimeout(struct timer_list *t)
+void TxBaInactTimeout(unsigned long data)
 {
-	PTX_TS_RECORD	pTxTs = from_timer(pTxTs, t, TxAdmittedBARecord.Timer);
+	PTX_TS_RECORD	pTxTs = (PTX_TS_RECORD)data;
 	struct ieee80211_device *ieee = container_of(pTxTs, struct ieee80211_device, TxTsRecord[pTxTs->num]);
 	TxTsDeleteBA(ieee, pTxTs);
 	ieee80211_send_DELBA(
@@ -695,9 +694,9 @@ void TxBaInactTimeout(struct timer_list *t)
 		DELBA_REASON_TIMEOUT);
 }
 
-void RxBaInactTimeout(struct timer_list *t)
+void RxBaInactTimeout(unsigned long data)
 {
-	PRX_TS_RECORD	pRxTs = from_timer(pRxTs, t, RxAdmittedBARecord.Timer);
+	PRX_TS_RECORD	pRxTs = (PRX_TS_RECORD)data;
 	struct ieee80211_device *ieee = container_of(pRxTs, struct ieee80211_device, RxTsRecord[pRxTs->num]);
 
 	RxTsDeleteBA(ieee, pRxTs);

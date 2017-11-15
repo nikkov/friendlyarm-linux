@@ -217,6 +217,13 @@ static void fwtty_log_tx_error(struct fwtty_port *port, int rcode)
 	}
 }
 
+static void fwtty_txn_constructor(void *this)
+{
+	struct fwtty_transaction *txn = this;
+
+	init_timer(&txn->fw_txn.split_timeout_timer);
+}
+
 static void fwtty_common_callback(struct fw_card *card, int rcode,
 				  void *payload, size_t len, void *cb_data)
 {
@@ -1799,9 +1806,9 @@ static void fwserial_release_port(struct fwtty_port *port, bool reset)
 		(*port->fwcon_ops->notify)(FWCON_NOTIFY_DETACH, port->con_data);
 }
 
-static void fwserial_plug_timeout(struct timer_list *t)
+static void fwserial_plug_timeout(unsigned long data)
 {
-	struct fwtty_peer *peer = from_timer(peer, t, timer);
+	struct fwtty_peer *peer = (struct fwtty_peer *)data;
 	struct fwtty_port *port;
 
 	spin_lock_bh(&peer->lock);
@@ -1853,6 +1860,7 @@ static int fwserial_connect_peer(struct fwtty_peer *peer)
 
 	fill_plug_req(pkt, peer->port);
 
+	setup_timer(&peer->timer, fwserial_plug_timeout, (unsigned long)peer);
 	mod_timer(&peer->timer, jiffies + VIRT_CABLE_PLUG_TIMEOUT);
 	spin_unlock_bh(&peer->lock);
 
@@ -2090,7 +2098,7 @@ static int fwserial_add_peer(struct fw_serial *serial, struct fw_unit *unit)
 	spin_lock_init(&peer->lock);
 	peer->port = NULL;
 
-	timer_setup(&peer->timer, fwserial_plug_timeout, 0);
+	init_timer(&peer->timer);
 	INIT_WORK(&peer->work, fwserial_peer_workfn);
 	INIT_DELAYED_WORK(&peer->connect, fwserial_auto_connect);
 
@@ -2855,7 +2863,7 @@ static int __init fwserial_init(void)
 
 	fwtty_txn_cache = kmem_cache_create("fwtty_txn_cache",
 					    sizeof(struct fwtty_transaction),
-					    0, 0, NULL);
+					    0, 0, fwtty_txn_constructor);
 	if (!fwtty_txn_cache) {
 		err = -ENOMEM;
 		goto unregister_loop;

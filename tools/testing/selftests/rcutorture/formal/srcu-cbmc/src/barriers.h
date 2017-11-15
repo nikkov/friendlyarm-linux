@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef BARRIERS_H
 #define BARRIERS_H
 
@@ -35,7 +34,8 @@
 #define rs_smp_mb() do {} while (0)
 #endif
 
-#define READ_ONCE(x) (*(volatile typeof(x) *) &(x))
-#define WRITE_ONCE(x) ((*(volatile typeof(x) *) &(x)) = (val))
+#define ACCESS_ONCE(x) (*(volatile typeof(x) *) &(x))
+#define READ_ONCE(x) ACCESS_ONCE(x)
+#define WRITE_ONCE(x, val) (ACCESS_ONCE(x) = (val))
 
 #endif

@@ -306,9 +306,9 @@ static int dummy_systimer_prepare(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static void dummy_systimer_callback(struct timer_list *t)
+static void dummy_systimer_callback(unsigned long data)
 {
-	struct dummy_systimer_pcm *dpcm = from_timer(dpcm, t, timer);
+	struct dummy_systimer_pcm *dpcm = (struct dummy_systimer_pcm *)data;
 	unsigned long flags;
 	int elapsed = 0;
 	
@@ -343,7 +343,8 @@ static int dummy_systimer_create(struct snd_pcm_substream *substream)
 	if (!dpcm)
 		return -ENOMEM;
 	substream->runtime->private_data = dpcm;
-	timer_setup(&dpcm->timer, dummy_systimer_callback, 0);
+	setup_timer(&dpcm->timer, dummy_systimer_callback,
+			(unsigned long) dpcm);
 	spin_lock_init(&dpcm->lock);
 	dpcm->substream = substream;
 	return 0;

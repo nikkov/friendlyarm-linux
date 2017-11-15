@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Test backward bit in event attribute, read ring buffer from end to
  * beginning

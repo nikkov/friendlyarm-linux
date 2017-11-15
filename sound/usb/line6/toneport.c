@@ -241,9 +241,9 @@ static int snd_toneport_source_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-static void toneport_start_pcm(struct timer_list *t)
+static void toneport_start_pcm(unsigned long arg)
 {
-	struct usb_line6_toneport *toneport = from_timer(toneport, t, timer);
+	struct usb_line6_toneport *toneport = (struct usb_line6_toneport *)arg;
 	struct usb_line6 *line6 = &toneport->line6;
 
 	line6_pcm_acquire(line6->line6pcm, LINE6_STREAM_MONITOR, true);
@@ -415,7 +415,8 @@ static int toneport_init(struct usb_line6 *line6,
 	struct usb_line6_toneport *toneport =  (struct usb_line6_toneport *) line6;
 
 	toneport->type = id->driver_info;
-	timer_setup(&toneport->timer, toneport_start_pcm, 0);
+	setup_timer(&toneport->timer, toneport_start_pcm,
+		    (unsigned long)toneport);
 
 	line6->disconnect = line6_toneport_disconnect;
 

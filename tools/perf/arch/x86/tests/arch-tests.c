@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <string.h>
 #include "tests/tests.h"
 #include "arch-tests.h"
@@ -24,6 +23,10 @@ struct test arch_tests[] = {
 		.func = test__insn_x86,
 	},
 #endif
+	{
+		.desc = "Intel cqm nmi context read",
+		.func = test__intel_cqm_count_nmi_context,
+	},
 	{
 		.func = NULL,
 	},

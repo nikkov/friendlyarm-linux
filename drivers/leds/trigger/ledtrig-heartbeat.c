@@ -25,22 +25,18 @@
 static int panic_heartbeats;
 
 struct heartbeat_trig_data {
-	struct led_classdev *led_cdev;
 	unsigned int phase;
 	unsigned int period;
 	struct timer_list timer;
 	unsigned int invert;
 };
 
-static void led_heartbeat_function(struct timer_list *t)
+static void led_heartbeat_function(unsigned long data)
 {
-	struct heartbeat_trig_data *heartbeat_data =
-		from_timer(heartbeat_data, t, timer);
-	struct led_classdev *led_cdev;
+	struct led_classdev *led_cdev = (struct led_classdev *) data;
+	struct heartbeat_trig_data *heartbeat_data = led_cdev->trigger_data;
 	unsigned long brightness = LED_OFF;
 	unsigned long delay = 0;
-
-	led_cdev = heartbeat_data->led_cdev;
 
 	if (unlikely(panic_heartbeats)) {
 		led_set_brightness_nosleep(led_cdev, LED_OFF);
@@ -131,18 +127,18 @@ static void heartbeat_trig_activate(struct led_classdev *led_cdev)
 		return;
 
 	led_cdev->trigger_data = heartbeat_data;
-	heartbeat_data->led_cdev = led_cdev;
 	rc = device_create_file(led_cdev->dev, &dev_attr_invert);
 	if (rc) {
 		kfree(led_cdev->trigger_data);
 		return;
 	}
 
-	timer_setup(&heartbeat_data->timer, led_heartbeat_function, 0);
+	setup_timer(&heartbeat_data->timer,
+		    led_heartbeat_function, (unsigned long) led_cdev);
 	heartbeat_data->phase = 0;
 	if (!led_cdev->blink_brightness)
 		led_cdev->blink_brightness = led_cdev->max_brightness;
-	led_heartbeat_function(&heartbeat_data->timer);
+	led_heartbeat_function(heartbeat_data->timer.data);
 	set_bit(LED_BLINK_SW, &led_cdev->work_flags);
 	led_cdev->activated = true;
 }

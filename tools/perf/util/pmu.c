@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/list.h>
 #include <linux/compiler.h>
 #include <sys/types.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -542,47 +540,6 @@ char * __weak get_cpuid_str(void)
 	return NULL;
 }
 
-static char *perf_pmu__getcpuid(void)
-{
-	char *cpuid;
-	static bool printed;
-
-	cpuid = getenv("PERF_CPUID");
-	if (cpuid)
-		cpuid = strdup(cpuid);
-	if (!cpuid)
-		cpuid = get_cpuid_str();
-	if (!cpuid)
-		return NULL;
-
-	if (!printed) {
-		pr_debug("Using CPUID %s\n", cpuid);
-		printed = true;
-	}
-	return cpuid;
-}
-
-struct pmu_events_map *perf_pmu__find_map(void)
-{
-	struct pmu_events_map *map;
-	char *cpuid = perf_pmu__getcpuid();
-	int i;
-
-	i = 0;
-	for (;;) {
-		map = &pmu_events_map[i++];
-		if (!map->table) {
-			map = NULL;
-			break;
-		}
-
-		if (!strcmp(map->cpuid, cpuid))
-			break;
-	}
-	free(cpuid);
-	return map;
-}
-
 /*
  * From the pmu_events_map, find the table of PMU events that corresponds
  * to the current running CPU. Then, add all PMU events from that table
@@ -593,10 +550,31 @@ static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
 	int i;
 	struct pmu_events_map *map;
 	struct pmu_event *pe;
+	char *cpuid;
+	static bool printed;
 
-	map = perf_pmu__find_map();
-	if (!map)
+	cpuid = getenv("PERF_CPUID");
+	if (cpuid)
+		cpuid = strdup(cpuid);
+	if (!cpuid)
+		cpuid = get_cpuid_str();
+	if (!cpuid)
 		return;
+
+	if (!printed) {
+		pr_debug("Using CPUID %s\n", cpuid);
+		printed = true;
+	}
+
+	i = 0;
+	while (1) {
+		map = &pmu_events_map[i++];
+		if (!map->table)
+			goto out;
+
+		if (!strcmp(map->cpuid, cpuid))
+			break;
+	}
 
 	/*
 	 * Found a matching PMU events table. Create aliases
@@ -606,11 +584,8 @@ static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
 		const char *pname;
 
 		pe = &map->table[i++];
-		if (!pe->name) {
-			if (pe->metric_group || pe->metric_name)
-				continue;
+		if (!pe->name)
 			break;
-		}
 
 		pname = pe->pmu ? pe->pmu : "cpu";
 		if (strncmp(pname, name, strlen(pname)))
@@ -624,6 +599,9 @@ static void pmu_add_cpu_aliases(struct list_head *head, const char *name)
 				(char *)pe->metric_expr,
 				(char *)pe->metric_name);
 	}
+
+out:
+	free(cpuid);
 }
 
 struct perf_event_attr * __weak

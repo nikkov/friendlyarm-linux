@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 rc-core-objs	:= rc-main.o rc-ir-raw.o
 
 obj-y += keymaps/

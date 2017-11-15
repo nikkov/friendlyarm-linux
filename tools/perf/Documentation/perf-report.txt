@@ -434,8 +434,7 @@ include::itrace.txt[]
 
 --inline::
 	If a callgraph address belongs to an inlined function, the inline stack
-	will be printed. Each entry is function name or file/line. Enabled by
-	default, disable with --no-inline.
+	will be printed. Each entry is function name or file/line.
 
 include::callchain-overhead-calculation.txt[]
 

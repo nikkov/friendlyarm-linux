@@ -1085,7 +1085,7 @@ static int __init qrtr_proto_init(void)
 
 	return 0;
 }
-postcore_initcall(qrtr_proto_init);
+module_init(qrtr_proto_init);
 
 static void __exit qrtr_proto_fini(void)
 {

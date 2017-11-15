@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/ncpfs/sock.c
  *
@@ -117,10 +116,10 @@ void ncp_tcp_write_space(struct sock *sk)
 		schedule_work(&server->tx.tq);
 }
 
-void ncpdgram_timeout_call(struct timer_list *t)
+void ncpdgram_timeout_call(unsigned long v)
 {
-	struct ncp_server *server = from_timer(server, t, timeout_tm);
-
+	struct ncp_server *server = (void*)v;
+	
 	schedule_work(&server->timeout_tq);
 }
 

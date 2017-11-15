@@ -96,7 +96,6 @@ struct jr3_pci_poll_delay {
 
 struct jr3_pci_dev_private {
 	struct timer_list timer;
-	struct comedi_device *dev;
 };
 
 union jr3_pci_single_range {
@@ -586,10 +585,10 @@ jr3_pci_poll_subdevice(struct comedi_subdevice *s)
 	return result;
 }
 
-static void jr3_pci_poll_dev(struct timer_list *t)
+static void jr3_pci_poll_dev(unsigned long data)
 {
-	struct jr3_pci_dev_private *devpriv = from_timer(devpriv, t, timer);
-	struct comedi_device *dev = devpriv->dev;
+	struct comedi_device *dev = (struct comedi_device *)data;
+	struct jr3_pci_dev_private *devpriv = dev->private;
 	struct jr3_pci_subdev_private *spriv;
 	struct comedi_subdevice *s;
 	unsigned long flags;
@@ -771,8 +770,7 @@ static int jr3_pci_auto_attach(struct comedi_device *dev,
 		spriv->next_time_min = jiffies + msecs_to_jiffies(500);
 	}
 
-	devpriv->dev = dev;
-	timer_setup(&devpriv->timer, jr3_pci_poll_dev, 0);
+	setup_timer(&devpriv->timer, jr3_pci_poll_dev, (unsigned long)dev);
 	devpriv->timer.expires = jiffies + msecs_to_jiffies(1000);
 	add_timer(&devpriv->timer);
 

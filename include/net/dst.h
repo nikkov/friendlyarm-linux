@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * net/dst.h	Protocol independent destination cache definitions.
  *

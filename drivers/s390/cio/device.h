@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef S390_DEVICE_H
 #define S390_DEVICE_H
 

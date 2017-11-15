@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _MM_PERCPU_INTERNAL_H
 #define _MM_PERCPU_INTERNAL_H
 

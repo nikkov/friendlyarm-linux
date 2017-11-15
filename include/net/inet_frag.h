@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_FRAG_H__
 #define __NET_FRAG_H__
 

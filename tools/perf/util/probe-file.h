@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PROBE_FILE_H
 #define __PROBE_FILE_H
 

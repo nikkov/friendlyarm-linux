@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  *  (c) Copyright 2008, RealTEK Technologies Inc. All Rights Reserved.

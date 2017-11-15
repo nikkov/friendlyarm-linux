@@ -184,11 +184,11 @@ static void hfa384x_usbin_ctlx(struct hfa384x *hw, union hfa384x_usbin *usbin,
 
 static void hfa384x_usbctlxq_run(struct hfa384x *hw);
 
-static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t);
+static void hfa384x_usbctlx_reqtimerfn(unsigned long data);
 
-static void hfa384x_usbctlx_resptimerfn(struct timer_list *t);
+static void hfa384x_usbctlx_resptimerfn(unsigned long data);
 
-static void hfa384x_usb_throttlefn(struct timer_list *t);
+static void hfa384x_usb_throttlefn(unsigned long data);
 
 static void hfa384x_usbctlx_completion_task(unsigned long data);
 
@@ -558,11 +558,13 @@ void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 	INIT_WORK(&hw->link_bh, prism2sta_processing_defer);
 	INIT_WORK(&hw->usb_work, hfa384x_usb_defer);
 
-	timer_setup(&hw->throttle, hfa384x_usb_throttlefn, 0);
+	setup_timer(&hw->throttle, hfa384x_usb_throttlefn, (unsigned long)hw);
 
-	timer_setup(&hw->resptimer, hfa384x_usbctlx_resptimerfn, 0);
+	setup_timer(&hw->resptimer, hfa384x_usbctlx_resptimerfn,
+		    (unsigned long)hw);
 
-	timer_setup(&hw->reqtimer, hfa384x_usbctlx_reqtimerfn, 0);
+	setup_timer(&hw->reqtimer, hfa384x_usbctlx_reqtimerfn,
+		    (unsigned long)hw);
 
 	usb_init_urb(&hw->rx_urb);
 	usb_init_urb(&hw->tx_urb);
@@ -572,7 +574,8 @@ void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 	hw->state = HFA384x_STATE_INIT;
 
 	INIT_WORK(&hw->commsqual_bh, prism2sta_commsqual_defer);
-	timer_setup(&hw->commsqual_timer, prism2sta_commsqual_timer, 0);
+	setup_timer(&hw->commsqual_timer, prism2sta_commsqual_timer,
+		    (unsigned long)hw);
 }
 
 /*----------------------------------------------------------------
@@ -2457,7 +2460,7 @@ int hfa384x_drvr_start(struct hfa384x *hw)
 	 * ok
 	 */
 	result =
-	    usb_get_std_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_in, &status);
+	    usb_get_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_in, &status);
 	if (result < 0) {
 		netdev_err(hw->wlandev->netdev, "Cannot get bulk in endpoint status.\n");
 		goto done;
@@ -2466,7 +2469,7 @@ int hfa384x_drvr_start(struct hfa384x *hw)
 		netdev_err(hw->wlandev->netdev, "Failed to reset bulk in endpoint.\n");
 
 	result =
-	    usb_get_std_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_out, &status);
+	    usb_get_status(hw->usb, USB_RECIP_ENDPOINT, hw->endp_out, &status);
 	if (result < 0) {
 		netdev_err(hw->wlandev->netdev, "Cannot get bulk out endpoint status.\n");
 		goto done;
@@ -3797,9 +3800,9 @@ delresp:
  *	interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
+static void hfa384x_usbctlx_reqtimerfn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, reqtimer);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3856,9 +3859,9 @@ static void hfa384x_usbctlx_reqtimerfn(struct timer_list *t)
  *	interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
+static void hfa384x_usbctlx_resptimerfn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, resptimer);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -3896,9 +3899,9 @@ static void hfa384x_usbctlx_resptimerfn(struct timer_list *t)
  *	Interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usb_throttlefn(struct timer_list *t)
+static void hfa384x_usb_throttlefn(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, throttle);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);

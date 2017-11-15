@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PERF_STATS_H
 #define __PERF_STATS_H
 
@@ -83,7 +82,7 @@ typedef void (*new_line_t )(void *ctx);
 
 void perf_stat__init_shadow_stats(void);
 void perf_stat__reset_shadow_stats(void);
-void perf_stat__update_shadow_stats(struct perf_evsel *counter, u64 count,
+void perf_stat__update_shadow_stats(struct perf_evsel *counter, u64 *count,
 				    int cpu);
 struct perf_stat_output_ctx {
 	void *ctx;
@@ -92,11 +91,9 @@ struct perf_stat_output_ctx {
 	bool force_header;
 };
 
-struct rblist;
 void perf_stat__print_shadow_stats(struct perf_evsel *evsel,
 				   double avg, int cpu,
-				   struct perf_stat_output_ctx *out,
-				   struct rblist *metric_events);
+				   struct perf_stat_output_ctx *out);
 void perf_stat__collect_metric_expr(struct perf_evlist *);
 
 int perf_evlist__alloc_stats(struct perf_evlist *evlist, bool alloc_raw);

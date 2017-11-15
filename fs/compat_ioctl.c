@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * ioctl32.c: Conversion between 32bit and 64bit native ioctls.
  *

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __BCM47XXNFLASH_H
 #define __BCM47XXNFLASH_H
 

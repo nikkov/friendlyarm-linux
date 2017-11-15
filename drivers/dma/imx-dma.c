@@ -364,9 +364,9 @@ static void imxdma_disable_hw(struct imxdma_channel *imxdmac)
 	local_irq_restore(flags);
 }
 
-static void imxdma_watchdog(struct timer_list *t)
+static void imxdma_watchdog(unsigned long data)
 {
-	struct imxdma_channel *imxdmac = from_timer(imxdmac, t, watchdog);
+	struct imxdma_channel *imxdmac = (struct imxdma_channel *)data;
 	struct imxdma_engine *imxdma = imxdmac->imxdma;
 	int channel = imxdmac->channel;
 
@@ -1153,7 +1153,9 @@ static int __init imxdma_probe(struct platform_device *pdev)
 			}
 
 			imxdmac->irq = irq + i;
-			timer_setup(&imxdmac->watchdog, imxdma_watchdog, 0);
+			init_timer(&imxdmac->watchdog);
+			imxdmac->watchdog.function = &imxdma_watchdog;
+			imxdmac->watchdog.data = (unsigned long)imxdmac;
 		}
 
 		imxdmac->imxdma = imxdma;

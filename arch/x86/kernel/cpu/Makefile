@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for x86-compatible CPU details, features and quirks
 #
@@ -23,7 +22,6 @@ obj-y			+= rdrand.o
 obj-y			+= match.o
 obj-y			+= bugs.o
 obj-$(CONFIG_CPU_FREQ)	+= aperfmperf.o
-obj-y			+= cpuid-deps.o
 
 obj-$(CONFIG_PROC_FS)	+= proc.o
 obj-$(CONFIG_X86_FEATURE_NAMES) += capflags.o powerflags.o

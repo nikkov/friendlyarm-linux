@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* viohs.c: LDOM Virtual I/O handshake helper layer.
  *
  * Copyright (C) 2007 David S. Miller <davem@davemloft.net>

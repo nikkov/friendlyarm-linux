@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * cpu.h: Values of the PRId register used to match up
  *	  various MIPS cpu types.

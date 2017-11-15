@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Some low level IO code, and hacks for various block layer limitations
  *

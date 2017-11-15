@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NET_NF_TABLES_H
 #define _NET_NF_TABLES_H
 
@@ -1165,8 +1164,8 @@ static inline u8 nft_genmask_next(const struct net *net)
 
 static inline u8 nft_genmask_cur(const struct net *net)
 {
-	/* Use READ_ONCE() to prevent refetching the value for atomicity */
-	return 1 << READ_ONCE(net->nft.gencursor);
+	/* Use ACCESS_ONCE() to prevent refetching the value for atomicity */
+	return 1 << ACCESS_ONCE(net->nft.gencursor);
 }
 
 #define NFT_GENMASK_ANY		((1 << 0) | (1 << 1))

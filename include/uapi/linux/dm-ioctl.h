@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: LGPL-2.0+ WITH Linux-syscall-note */
 /*
  * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
  * Copyright (C) 2004 - 2009 Red Hat, Inc. All rights reserved.

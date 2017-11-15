@@ -717,7 +717,7 @@ static noinline int replay_one_extent(struct btrfs_trans_handle *trans,
 			ret = btrfs_lookup_data_extent(fs_info, ins.objectid,
 						ins.offset);
 			if (ret == 0) {
-				ret = btrfs_inc_extent_ref(trans, root,
+				ret = btrfs_inc_extent_ref(trans, fs_info,
 						ins.objectid, ins.offset,
 						0, root->root_key.objectid,
 						key->objectid, offset);
@@ -2699,36 +2699,34 @@ static void wait_log_commit(struct btrfs_root *root, int transid)
 	 * so we know that if ours is more than 2 older than the
 	 * current transaction, we're done
 	 */
-	for (;;) {
+	do {
 		prepare_to_wait(&root->log_commit_wait[index],
 				&wait, TASK_UNINTERRUPTIBLE);
-
-		if (!(root->log_transid_committed < transid &&
-		      atomic_read(&root->log_commit[index])))
-			break;
-
 		mutex_unlock(&root->log_mutex);
-		schedule();
+
+		if (root->log_transid_committed < transid &&
+		    atomic_read(&root->log_commit[index]))
+			schedule();
+
+		finish_wait(&root->log_commit_wait[index], &wait);
 		mutex_lock(&root->log_mutex);
-	}
-	finish_wait(&root->log_commit_wait[index], &wait);
+	} while (root->log_transid_committed < transid &&
+		 atomic_read(&root->log_commit[index]));
 }
 
 static void wait_for_writer(struct btrfs_root *root)
 {
 	DEFINE_WAIT(wait);
 
-	for (;;) {
-		prepare_to_wait(&root->log_writer_wait, &wait,
-				TASK_UNINTERRUPTIBLE);
-		if (!atomic_read(&root->log_writers))
-			break;
-
+	while (atomic_read(&root->log_writers)) {
+		prepare_to_wait(&root->log_writer_wait,
+				&wait, TASK_UNINTERRUPTIBLE);
 		mutex_unlock(&root->log_mutex);
-		schedule();
+		if (atomic_read(&root->log_writers))
+			schedule();
+		finish_wait(&root->log_writer_wait, &wait);
 		mutex_lock(&root->log_mutex);
 	}
-	finish_wait(&root->log_writer_wait, &wait);
 }
 
 static inline void btrfs_remove_log_ctx(struct btrfs_root *root,
@@ -4647,6 +4645,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	struct btrfs_key min_key;
 	struct btrfs_key max_key;
 	struct btrfs_root *log = root->log_root;
+	struct extent_buffer *src = NULL;
 	LIST_HEAD(logged_list);
 	u64 last_extent = 0;
 	int err = 0;
@@ -4889,6 +4888,7 @@ again:
 			goto next_slot;
 		}
 
+		src = path->nodes[0];
 		if (ins_nr && ins_start_slot + ins_nr == path->slots[0]) {
 			ins_nr++;
 			goto next_slot;

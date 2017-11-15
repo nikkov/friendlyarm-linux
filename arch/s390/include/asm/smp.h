@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *    Copyright IBM Corp. 1999, 2012
  *    Author(s): Denis Joseph Barrow,
@@ -28,7 +27,6 @@ extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 
 extern void smp_call_online_cpu(void (*func)(void *), void *);
 extern void smp_call_ipl_cpu(void (*func)(void *), void *);
-extern void smp_emergency_stop(void);
 
 extern int smp_find_processor_id(u16 address);
 extern int smp_store_status(int cpu);
@@ -52,10 +50,6 @@ static inline void smp_call_ipl_cpu(void (*func)(void *), void *data)
 static inline void smp_call_online_cpu(void (*func)(void *), void *data)
 {
 	func(data);
-}
-
-static inline void smp_emergency_stop(void)
-{
 }
 
 static inline int smp_find_processor_id(u16 address) { return 0; }

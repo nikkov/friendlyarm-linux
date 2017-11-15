@@ -63,9 +63,9 @@ struct ct_timer {
  * system-timer-based updates
  */
 
-static void ct_systimer_callback(struct timer_list *t)
+static void ct_systimer_callback(unsigned long data)
 {
-	struct ct_timer_instance *ti = from_timer(ti, t, timer);
+	struct ct_timer_instance *ti = (struct ct_timer_instance *)data;
 	struct snd_pcm_substream *substream = ti->substream;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct ct_atc_pcm *apcm = ti->apcm;
@@ -93,7 +93,8 @@ static void ct_systimer_callback(struct timer_list *t)
 
 static void ct_systimer_init(struct ct_timer_instance *ti)
 {
-	timer_setup(&ti->timer, ct_systimer_callback, 0);
+	setup_timer(&ti->timer, ct_systimer_callback,
+		    (unsigned long)ti);
 }
 
 static void ct_systimer_start(struct ct_timer_instance *ti)

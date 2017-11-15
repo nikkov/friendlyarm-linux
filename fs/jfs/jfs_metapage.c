@@ -663,8 +663,6 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 	} else {
 		INCREMENT(mpStat.pagealloc);
 		mp = alloc_metapage(GFP_NOFS);
-		if (!mp)
-			goto unlock;
 		mp->page = page;
 		mp->sb = inode->i_sb;
 		mp->flag = 0;

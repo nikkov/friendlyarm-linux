@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 FILES=                                          \
          test-all.bin                           \
          test-backtrace.bin                     \

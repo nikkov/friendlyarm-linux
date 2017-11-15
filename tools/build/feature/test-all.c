@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * test-all.c: Try to build all the main testcases at once.
  *

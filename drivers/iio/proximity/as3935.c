@@ -221,6 +221,7 @@ static int as3935_read_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info as3935_info = {
+	.driver_module = THIS_MODULE,
 	.attrs = &as3935_attribute_group,
 	.read_raw = &as3935_read_raw,
 };
@@ -246,6 +247,7 @@ err_read:
 }
 
 static const struct iio_trigger_ops iio_interrupt_trigger_ops = {
+	.owner = THIS_MODULE,
 };
 
 static void as3935_event_work(struct work_struct *work)

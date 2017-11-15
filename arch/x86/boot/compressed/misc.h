@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef BOOT_COMPRESSED_MISC_H
 #define BOOT_COMPRESSED_MISC_H
 
@@ -108,7 +107,5 @@ static const int early_serial_base;
 static inline void console_init(void)
 { }
 #endif
-
-unsigned long get_sev_encryption_mask(void);
 
 #endif

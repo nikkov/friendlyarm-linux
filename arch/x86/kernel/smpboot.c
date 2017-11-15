@@ -77,7 +77,6 @@
 #include <asm/i8259.h>
 #include <asm/realmode.h>
 #include <asm/misc.h>
-#include <asm/qspinlock.h>
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
@@ -195,12 +194,6 @@ static void smp_callin(void)
 	smp_store_cpu_info(cpuid);
 
 	/*
-	 * The topology information must be up to date before
-	 * calibrate_delay() and notify_cpu_starting().
-	 */
-	set_cpu_sibling_map(raw_smp_processor_id());
-
-	/*
 	 * Get our bogomips.
 	 * Update loops_per_jiffy in cpu_data. Previous call to
 	 * smp_store_cpu_info() stored a value that is close but not as
@@ -210,6 +203,11 @@ static void smp_callin(void)
 	cpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;
 	pr_debug("Stack at about %p\n", &cpuid);
 
+	/*
+	 * This must be done before setting cpu_online_mask
+	 * or calling notify_cpu_starting.
+	 */
+	set_cpu_sibling_map(raw_smp_processor_id());
 	wmb();
 
 	notify_cpu_starting(cpuid);
@@ -251,19 +249,19 @@ static void notrace start_secondary(void *unused)
 	/* otherwise gcc will move up smp_processor_id before the cpu_init */
 	barrier();
 	/*
-	 * Check TSC synchronization with the boot CPU:
+	 * Check TSC synchronization with the BP:
 	 */
 	check_tsc_sync_target();
 
 	/*
-	 * Lock vector_lock, set CPU online and bring the vector
-	 * allocator online. Online must be set with vector_lock held
-	 * to prevent a concurrent irq setup/teardown from seeing a
-	 * half valid vector space.
+	 * Lock vector_lock and initialize the vectors on this cpu
+	 * before setting the cpu online. We must set it online with
+	 * vector_lock held to prevent a concurrent setup/teardown
+	 * from seeing a half valid vector space.
 	 */
 	lock_vector_lock();
+	setup_vector_irq(smp_processor_id());
 	set_cpu_online(smp_processor_id(), true);
-	lapic_online();
 	unlock_vector_lock();
 	cpu_set_state_online(smp_processor_id());
 	x86_platform.nmi_init();
@@ -963,7 +961,8 @@ void common_cpu_up(unsigned int cpu, struct task_struct *idle)
 #ifdef CONFIG_X86_32
 	/* Stack for startup_32 can be just as for start_secondary onwards */
 	irq_ctx_init(cpu);
-	per_cpu(cpu_current_top_of_stack, cpu) = task_top_of_stack(idle);
+	per_cpu(cpu_current_top_of_stack, cpu) =
+		(unsigned long)task_stack_page(idle) + THREAD_SIZE;
 #else
 	initial_gs = per_cpu_offset(cpu);
 #endif
@@ -1095,7 +1094,7 @@ int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
 	unsigned long flags;
 	int err, ret = 0;
 
-	lockdep_assert_irqs_enabled();
+	WARN_ON(irqs_disabled());
 
 	pr_debug("++++++++++++++++++++=_---CPU UP  %u\n", cpu);
 
@@ -1191,10 +1190,17 @@ static __init void disable_smp(void)
 	cpumask_set_cpu(0, topology_core_cpumask(0));
 }
 
+enum {
+	SMP_OK,
+	SMP_NO_CONFIG,
+	SMP_NO_APIC,
+	SMP_FORCE_UP,
+};
+
 /*
  * Various sanity checks.
  */
-static void __init smp_sanity_check(void)
+static int __init smp_sanity_check(unsigned max_cpus)
 {
 	preempt_disable();
 
@@ -1232,6 +1238,16 @@ static void __init smp_sanity_check(void)
 	}
 
 	/*
+	 * If we couldn't find an SMP configuration at boot time,
+	 * get out of here now!
+	 */
+	if (!smp_found_config && !acpi_lapic) {
+		preempt_enable();
+		pr_notice("SMP motherboard not detected\n");
+		return SMP_NO_CONFIG;
+	}
+
+	/*
 	 * Should not be necessary because the MP table should list the boot
 	 * CPU too, but we do it for the sake of robustness anyway.
 	 */
@@ -1241,6 +1257,29 @@ static void __init smp_sanity_check(void)
 		physid_set(hard_smp_processor_id(), phys_cpu_present_map);
 	}
 	preempt_enable();
+
+	/*
+	 * If we couldn't find a local APIC, then get out of here now!
+	 */
+	if (APIC_INTEGRATED(boot_cpu_apic_version) &&
+	    !boot_cpu_has(X86_FEATURE_APIC)) {
+		if (!disable_apic) {
+			pr_err("BIOS bug, local APIC #%d not detected!...\n",
+				boot_cpu_physical_apicid);
+			pr_err("... forcing use of dummy APIC emulation (tell your hw vendor)\n");
+		}
+		return SMP_NO_APIC;
+	}
+
+	/*
+	 * If SMP should be disabled, then really disable it!
+	 */
+	if (!max_cpus) {
+		pr_info("SMP mode deactivated\n");
+		return SMP_FORCE_UP;
+	}
+
+	return SMP_OK;
 }
 
 static void __init smp_cpu_index_default(void)
@@ -1255,18 +1294,9 @@ static void __init smp_cpu_index_default(void)
 	}
 }
 
-static void __init smp_get_logical_apicid(void)
-{
-	if (x2apic_mode)
-		cpu0_logical_apicid = apic_read(APIC_LDR);
-	else
-		cpu0_logical_apicid = GET_APIC_LOGICAL_ID(apic_read(APIC_LDR));
-}
-
 /*
- * Prepare for SMP bootup.
- * @max_cpus: configured maximum number of CPUs, It is a legacy parameter
- *            for common interface support.
+ * Prepare for SMP bootup.  The MP table or ACPI has been read
+ * earlier.  Just do some sanity checking here and enable APIC mode.
  */
 void __init native_smp_prepare_cpus(unsigned int max_cpus)
 {
@@ -1298,32 +1328,34 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 
 	set_cpu_sibling_map(0);
 
-	smp_sanity_check();
-
-	switch (apic_intr_mode) {
-	case APIC_PIC:
-	case APIC_VIRTUAL_WIRE_NO_CONFIG:
+	switch (smp_sanity_check(max_cpus)) {
+	case SMP_NO_CONFIG:
+		disable_smp();
+		if (APIC_init_uniprocessor())
+			pr_notice("Local APIC not detected. Using dummy APIC emulation.\n");
+		return;
+	case SMP_NO_APIC:
 		disable_smp();
 		return;
-	case APIC_SYMMETRIC_IO_NO_ROUTING:
+	case SMP_FORCE_UP:
 		disable_smp();
-		/* Setup local timer */
-		x86_init.timers.setup_percpu_clockev();
+		apic_bsp_setup(false);
 		return;
-	case APIC_VIRTUAL_WIRE:
-	case APIC_SYMMETRIC_IO:
+	case SMP_OK:
 		break;
 	}
 
-	/* Setup local timer */
-	x86_init.timers.setup_percpu_clockev();
+	if (read_apic_id() != boot_cpu_physical_apicid) {
+		panic("Boot APIC ID in local APIC unexpected (%d vs %d)",
+		     read_apic_id(), boot_cpu_physical_apicid);
+		/* Or can we switch back to PIC here? */
+	}
 
-	smp_get_logical_apicid();
+	default_setup_apic_routing();
+	cpu0_logical_apicid = apic_bsp_setup(false);
 
 	pr_info("CPU0: ");
 	print_cpu_info(&cpu_data(0));
-
-	native_pv_lock_init();
 
 	uv_system_init();
 
@@ -1363,6 +1395,7 @@ void __init native_smp_cpus_done(unsigned int max_cpus)
 
 	nmi_selftest();
 	impress_friends();
+	setup_ioapic_dest();
 	mtrr_aps_init();
 }
 
@@ -1521,14 +1554,13 @@ void cpu_disable_common(void)
 	remove_cpu_from_maps(cpu);
 	unlock_vector_lock();
 	fixup_irqs();
-	lapic_offline();
 }
 
 int native_cpu_disable(void)
 {
 	int ret;
 
-	ret = lapic_can_unplug_cpu();
+	ret = check_irq_vectors_for_cpu_disable();
 	if (ret)
 		return ret;
 

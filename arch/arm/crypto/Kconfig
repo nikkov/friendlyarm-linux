@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 
 menuconfig ARM_CRYPTO
 	bool "ARM Accelerated Cryptographic Algorithms"

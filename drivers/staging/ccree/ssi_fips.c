@@ -19,6 +19,7 @@
 
 #include "ssi_config.h"
 #include "ssi_driver.h"
+#include "cc_hal.h"
 #include "ssi_fips.h"
 
 static void fips_dsr(unsigned long devarg);
@@ -33,8 +34,9 @@ struct ssi_fips_handle {
 static bool cc_get_tee_fips_status(struct ssi_drvdata *drvdata)
 {
 	u32 reg;
+	void __iomem *cc_base = drvdata->cc_base;
 
-	reg = cc_ioread(drvdata, CC_REG(GPR_HOST));
+	reg = CC_HAL_READ_REGISTER(CC_REG_OFFSET(HOST_RGF, GPR_HOST));
 	return (reg == (CC_FIPS_SYNC_TEE_STATUS | CC_FIPS_SYNC_MODULE_OK));
 }
 
@@ -44,11 +46,12 @@ static bool cc_get_tee_fips_status(struct ssi_drvdata *drvdata)
  */
 void cc_set_ree_fips_status(struct ssi_drvdata *drvdata, bool status)
 {
+	void __iomem *cc_base = drvdata->cc_base;
 	int val = CC_FIPS_SYNC_REE_STATUS;
 
 	val |= (status ? CC_FIPS_SYNC_MODULE_OK : CC_FIPS_SYNC_MODULE_ERROR);
 
-	cc_iowrite(drvdata, CC_REG(HOST_GPR0), val);
+	CC_HAL_WRITE_REGISTER(CC_REG_OFFSET(HOST_RGF, HOST_GPR0), val);
 }
 
 void ssi_fips_fini(struct ssi_drvdata *drvdata)
@@ -73,42 +76,41 @@ void fips_handler(struct ssi_drvdata *drvdata)
 	tasklet_schedule(&fips_handle_ptr->tasklet);
 }
 
-static inline void tee_fips_error(struct device *dev)
+static inline void tee_fips_error(void)
 {
 	if (fips_enabled)
 		panic("ccree: TEE reported cryptographic error in fips mode!\n");
 	else
-		dev_err(dev, "TEE reported error!\n");
+		SSI_LOG_ERR("TEE reported error!\n");
 }
 
 /* Deferred service handler, run as interrupt-fired tasklet */
 static void fips_dsr(unsigned long devarg)
 {
 	struct ssi_drvdata *drvdata = (struct ssi_drvdata *)devarg;
-	struct device *dev = drvdata_to_dev(drvdata);
+	void __iomem *cc_base = drvdata->cc_base;
 	u32 irq, state, val;
 
 	irq = (drvdata->irq & (SSI_GPR0_IRQ_MASK));
 
 	if (irq) {
-		state = cc_ioread(drvdata, CC_REG(GPR_HOST));
+		state = CC_HAL_READ_REGISTER(CC_REG_OFFSET(HOST_RGF, GPR_HOST));
 
 		if (state != (CC_FIPS_SYNC_TEE_STATUS | CC_FIPS_SYNC_MODULE_OK))
-			tee_fips_error(dev);
+			tee_fips_error();
 	}
 
 	/* after verifing that there is nothing to do,
 	 * unmask AXI completion interrupt.
 	 */
-	val = (CC_REG(HOST_IMR) & ~irq);
-	cc_iowrite(drvdata, CC_REG(HOST_IMR), val);
+	val = (CC_REG_OFFSET(HOST_RGF, HOST_IMR) & ~irq);
+	CC_HAL_WRITE_REGISTER(CC_REG_OFFSET(HOST_RGF, HOST_IMR), val);
 }
 
 /* The function called once at driver entry point .*/
 int ssi_fips_init(struct ssi_drvdata *p_drvdata)
 {
 	struct ssi_fips_handle *fips_h;
-	struct device *dev = drvdata_to_dev(p_drvdata);
 
 	fips_h = kzalloc(sizeof(*fips_h), GFP_KERNEL);
 	if (!fips_h)
@@ -116,11 +118,11 @@ int ssi_fips_init(struct ssi_drvdata *p_drvdata)
 
 	p_drvdata->fips_handle = fips_h;
 
-	dev_dbg(dev, "Initializing fips tasklet\n");
+	SSI_LOG_DEBUG("Initializing fips tasklet\n");
 	tasklet_init(&fips_h->tasklet, fips_dsr, (unsigned long)p_drvdata);
 
 	if (!cc_get_tee_fips_status(p_drvdata))
-		tee_fips_error(dev);
+		tee_fips_error();
 
 	return 0;
 }

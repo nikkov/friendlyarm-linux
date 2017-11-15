@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NETFILTER_INGRESS_H_
 #define _NETFILTER_INGRESS_H_
 

@@ -333,9 +333,6 @@ static int iscsi_login_zero_tsih_s1(
 	spin_lock_init(&sess->session_usage_lock);
 	spin_lock_init(&sess->ttt_lock);
 
-	timer_setup(&sess->time2retain_timer,
-		    iscsit_handle_time2retain_timeout, 0);
-
 	idr_preload(GFP_KERNEL);
 	spin_lock_bh(&sess_idr_lock);
 	ret = idr_alloc(&sess_idr, NULL, 0, 0, GFP_NOWAIT);
@@ -842,9 +839,9 @@ void iscsi_post_login_handler(
 	iscsit_dec_conn_usage_count(conn);
 }
 
-void iscsi_handle_login_thread_timeout(struct timer_list *t)
+static void iscsi_handle_login_thread_timeout(unsigned long data)
 {
-	struct iscsi_np *np = from_timer(np, t, np_login_timer);
+	struct iscsi_np *np = (struct iscsi_np *) data;
 
 	spin_lock_bh(&np->np_thread_lock);
 	pr_err("iSCSI Login timeout on Network Portal %pISpc\n",
@@ -869,9 +866,13 @@ static void iscsi_start_login_thread_timer(struct iscsi_np *np)
 	 * point we do not have access to ISCSI_TPG_ATTRIB(tpg)->login_timeout
 	 */
 	spin_lock_bh(&np->np_thread_lock);
+	init_timer(&np->np_login_timer);
+	np->np_login_timer.expires = (get_jiffies_64() + TA_LOGIN_TIMEOUT * HZ);
+	np->np_login_timer.data = (unsigned long)np;
+	np->np_login_timer.function = iscsi_handle_login_thread_timeout;
 	np->np_login_timer_flags &= ~ISCSI_TF_STOP;
 	np->np_login_timer_flags |= ISCSI_TF_RUNNING;
-	mod_timer(&np->np_login_timer, jiffies + TA_LOGIN_TIMEOUT * HZ);
+	add_timer(&np->np_login_timer);
 
 	pr_debug("Added timeout timer to iSCSI login request for"
 			" %u seconds.\n", TA_LOGIN_TIMEOUT);
@@ -1264,10 +1265,6 @@ static int __iscsi_target_login_thread(struct iscsi_np *np)
 	}
 	pr_debug("Moving to TARG_CONN_STATE_FREE.\n");
 	conn->conn_state = TARG_CONN_STATE_FREE;
-
-	timer_setup(&conn->nopin_response_timer,
-		    iscsit_handle_nopin_response_timeout, 0);
-	timer_setup(&conn->nopin_timer, iscsit_handle_nopin_timeout, 0);
 
 	if (iscsit_conn_set_transport(conn, np->np_transport) < 0) {
 		kfree(conn);

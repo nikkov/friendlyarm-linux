@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #define USE_DVICHIP
 #ifdef USE_DVICHIP
 
@@ -297,8 +296,7 @@ void sii164SetPower(unsigned char powerUp)
  *  sii164SelectHotPlugDetectionMode
  *      This function selects the mode of the hot plug detection.
  */
-static
-void sii164SelectHotPlugDetectionMode(enum sii164_hot_plug_mode hotPlugMode)
+static void sii164SelectHotPlugDetectionMode(sii164_hot_plug_mode_t hotPlugMode)
 {
 	unsigned char detectReg;
 

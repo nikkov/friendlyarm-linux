@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  Page table allocation functions
  *
@@ -159,13 +158,13 @@ static inline unsigned int atomic_xor_bits(atomic_t *v, unsigned int bits)
 struct page *page_table_alloc_pgste(struct mm_struct *mm)
 {
 	struct page *page;
-	u64 *table;
+	unsigned long *table;
 
 	page = alloc_page(GFP_KERNEL);
 	if (page) {
-		table = (u64 *)page_to_phys(page);
-		memset64(table, _PAGE_INVALID, PTRS_PER_PTE);
-		memset64(table + PTRS_PER_PTE, 0, PTRS_PER_PTE);
+		table = (unsigned long *) page_to_phys(page);
+		clear_table(table, _PAGE_INVALID, PAGE_SIZE/2);
+		clear_table(table + PTRS_PER_PTE, 0, PAGE_SIZE/2);
 	}
 	return page;
 }
@@ -222,12 +221,12 @@ unsigned long *page_table_alloc(struct mm_struct *mm)
 	if (mm_alloc_pgste(mm)) {
 		/* Return 4K page table with PGSTEs */
 		atomic_set(&page->_mapcount, 3);
-		memset64((u64 *)table, _PAGE_INVALID, PTRS_PER_PTE);
-		memset64((u64 *)table + PTRS_PER_PTE, 0, PTRS_PER_PTE);
+		clear_table(table, _PAGE_INVALID, PAGE_SIZE/2);
+		clear_table(table + PTRS_PER_PTE, 0, PAGE_SIZE/2);
 	} else {
 		/* Return the first 2K fragment of the page */
 		atomic_set(&page->_mapcount, 1);
-		memset64((u64 *)table, _PAGE_INVALID, 2 * PTRS_PER_PTE);
+		clear_table(table, _PAGE_INVALID, PAGE_SIZE);
 		spin_lock_bh(&mm->context.lock);
 		list_add(&page->lru, &mm->context.pgtable_list);
 		spin_unlock_bh(&mm->context.lock);

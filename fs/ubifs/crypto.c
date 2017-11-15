@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "ubifs.h"
 
 static int ubifs_crypt_get_context(struct inode *inode, void *ctx, size_t len)
@@ -88,6 +87,7 @@ const struct fscrypt_operations ubifs_crypt_operations = {
 	.key_prefix		= "ubifs:",
 	.get_context		= ubifs_crypt_get_context,
 	.set_context		= ubifs_crypt_set_context,
+	.is_encrypted		= __ubifs_crypt_is_encrypted,
 	.empty_dir		= ubifs_crypt_empty_dir,
 	.max_namelen		= ubifs_crypt_max_namelen,
 };

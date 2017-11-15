@@ -1184,7 +1184,7 @@ static void ide_init_port_data(ide_hwif_t *hwif, unsigned int index)
 
 	spin_lock_init(&hwif->lock);
 
-	timer_setup(&hwif->timer, ide_timer_expiry, 0);
+	setup_timer(&hwif->timer, &ide_timer_expiry, (unsigned long)hwif);
 
 	init_completion(&hwif->gendev_rel_comp);
 

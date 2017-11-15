@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-1.0+
 /*
  * Renesas USB
  *
@@ -184,9 +183,8 @@ struct renesas_usbhs_driver_param {
 #define USBHS_USB_DMAC_XFER_SIZE	32	/* hardcode the xfer size */
 };
 
-#define USBHS_TYPE_RCAR_GEN2		1
-#define USBHS_TYPE_RCAR_GEN3		2
-#define USBHS_TYPE_RCAR_GEN3_WITH_PLL	3
+#define USBHS_TYPE_RCAR_GEN2	1
+#define USBHS_TYPE_RCAR_GEN3	2
 
 /*
  * option:

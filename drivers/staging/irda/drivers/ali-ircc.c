@@ -1876,7 +1876,8 @@ static int  ali_ircc_dma_receive_complete(struct ali_ircc_cb *self)
 			self->stamp = ktime_get();
 
 			skb = dev_alloc_skb(len+1);
-			if (!skb) {
+			if (skb == NULL)  
+			{
 				self->netdev->stats.rx_dropped++;
 
 				return FALSE;

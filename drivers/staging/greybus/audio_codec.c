@@ -1,8 +1,9 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * APBridge ALSA SoC dummy codec driver
  * Copyright 2016 Google Inc.
  * Copyright 2016 Linaro Ltd.
+ *
+ * Released under the GPLv2 only.
  */
 #include <linux/kernel.h>
 #include <linux/module.h>

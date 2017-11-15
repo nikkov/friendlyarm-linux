@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2008 Steven Rostedt <srostedt@redhat.com>
  *
@@ -78,7 +77,7 @@ check_stack(unsigned long ip, unsigned long *stack)
 {
 	unsigned long this_size, flags; unsigned long *p, *top, *start;
 	static int tracer_frame;
-	int frame_size = READ_ONCE(tracer_frame);
+	int frame_size = ACCESS_ONCE(tracer_frame);
 	int i, x;
 
 	this_size = ((unsigned long)stack) & (THREAD_SIZE-1);

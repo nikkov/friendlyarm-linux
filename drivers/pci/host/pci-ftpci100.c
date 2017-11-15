@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Support for Faraday Technology FTPC100 PCI Controller
  *

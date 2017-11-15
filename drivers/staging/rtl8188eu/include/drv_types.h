@@ -128,8 +128,7 @@ struct dvobj_priv {
 static inline struct device *dvobj_to_dev(struct dvobj_priv *dvobj)
 {
 	/* todo: get interface type from dvobj and the return
-	 * the dev accordingly
-	 */
+	 * the dev accordingly */
 	return &dvobj->pusbintf->dev;
 };
 

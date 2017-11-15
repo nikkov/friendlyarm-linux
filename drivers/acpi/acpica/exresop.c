@@ -415,7 +415,7 @@ acpi_ex_resolve_operands(u16 opcode,
 			 * Known as "Implicit Source Operand Conversion"
 			 */
 			status = acpi_ex_convert_to_integer(obj_desc, stack_ptr,
-							    ACPI_IMPLICIT_CONVERSION);
+							    ACPI_STRTOUL_BASE16);
 			if (ACPI_FAILURE(status)) {
 				if (status == AE_TYPE) {
 					ACPI_ERROR((AE_INFO,

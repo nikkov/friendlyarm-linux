@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Common LSM logging functions
  * Heavily borrowed from selinux/avc.h

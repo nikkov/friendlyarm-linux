@@ -53,7 +53,7 @@ int snd_emux_new(struct snd_emux **remu)
 	emu->max_voices = 0;
 	emu->use_time = 0;
 
-	timer_setup(&emu->tlist, snd_emux_timer_callback, 0);
+	setup_timer(&emu->tlist, snd_emux_timer_callback, (unsigned long)emu);
 	emu->timer_active = 0;
 
 	*remu = emu;

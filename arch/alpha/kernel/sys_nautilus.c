@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *	linux/arch/alpha/kernel/sys_nautilus.c
  *
@@ -63,7 +62,7 @@ nautilus_init_irq(void)
 	common_init_isa_dma();
 }
 
-static int
+static int __init
 nautilus_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	/* Preserve the IRQ set up by the console.  */

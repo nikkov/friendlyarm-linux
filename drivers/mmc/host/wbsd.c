@@ -956,9 +956,9 @@ static const struct mmc_host_ops wbsd_ops = {
  * Helper function to reset detection ignore
  */
 
-static void wbsd_reset_ignore(struct timer_list *t)
+static void wbsd_reset_ignore(unsigned long data)
 {
-	struct wbsd_host *host = from_timer(host, t, ignore_timer);
+	struct wbsd_host *host = (struct wbsd_host *)data;
 
 	BUG_ON(host == NULL);
 
@@ -1224,7 +1224,9 @@ static int wbsd_alloc_mmc(struct device *dev)
 	/*
 	 * Set up timers
 	 */
-	timer_setup(&host->ignore_timer, wbsd_reset_ignore, 0);
+	init_timer(&host->ignore_timer);
+	host->ignore_timer.data = (unsigned long)host;
+	host->ignore_timer.function = wbsd_reset_ignore;
 
 	/*
 	 * Maximum number of segments. Worst case is one sector per segment

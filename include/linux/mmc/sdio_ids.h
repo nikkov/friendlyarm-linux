@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * SDIO Classes, Interface Types, Manufacturer IDs, etc.
  */

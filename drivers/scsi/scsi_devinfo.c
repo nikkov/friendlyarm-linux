@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/blkdev.h>
 #include <linux/init.h>
@@ -135,7 +134,6 @@ static struct {
 	{"3PARdata", "VV", NULL, BLIST_REPORTLUN2},
 	{"ADAPTEC", "AACRAID", NULL, BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", NULL, BLIST_FORCELUN},
-	{"AIX", "VDASD", NULL, BLIST_TRY_VPD_PAGES},
 	{"AFT PRO", "-IX CF", "0.0>", BLIST_FORCELUN},
 	{"BELKIN", "USB 2 HS-CF", "1.95",  BLIST_FORCELUN | BLIST_INQUIRY_36},
 	{"BROWNIE", "1200U3P", NULL, BLIST_NOREPORTLUN},
@@ -162,7 +160,7 @@ static struct {
 	{"DGC", "RAID", NULL, BLIST_SPARSELUN},	/* Dell PV 650F, storage on LUN 0 */
 	{"DGC", "DISK", NULL, BLIST_SPARSELUN},	/* Dell PV 650F, no storage on LUN 0 */
 	{"EMC",  "Invista", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"EMC", "SYMMETRIX", NULL, BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_REPORTLUN2},
+	{"EMC", "SYMMETRIX", NULL, BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN},
 	{"EMULEX", "MD21/S2     ESDI", NULL, BLIST_SINGLELUN},
 	{"easyRAID", "16P", NULL, BLIST_NOREPORTLUN},
 	{"easyRAID", "X6P", NULL, BLIST_NOREPORTLUN},
@@ -175,7 +173,7 @@ static struct {
 	{"HITACHI", "DF500", "*", BLIST_REPORTLUN2},
 	{"HITACHI", "DISK-SUBSYSTEM", "*", BLIST_REPORTLUN2},
 	{"HITACHI", "HUS1530", "*", BLIST_NO_DIF},
-	{"HITACHI", "OPEN-", "*", BLIST_REPORTLUN2 | BLIST_TRY_VPD_PAGES},
+	{"HITACHI", "OPEN-", "*", BLIST_REPORTLUN2},
 	{"HITACHI", "OP-C-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"HITACHI", "3380-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"HITACHI", "3390-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -306,8 +304,8 @@ static void scsi_strcpy_devinfo(char *name, char *to, size_t to_length,
 			 */
 			to[from_length] = '\0';
 		} else {
-			/*
-			 * space pad the string if it is short.
+			/* 
+			 * space pad the string if it is short. 
 			 */
 			strncpy(&to[from_length], spaces,
 				to_length - from_length);
@@ -327,10 +325,10 @@ static void scsi_strcpy_devinfo(char *name, char *to, size_t to_length,
  * @flags:	if strflags NULL, use this flag value
  *
  * Description:
- *	Create and add one dev_info entry for @vendor, @model, @strflags or
- *	@flag. If @compatible, add to the tail of the list, do not space
- *	pad, and set devinfo->compatible. The scsi_static_device_list entries
- *	are added with @compatible 1 and @clfags NULL.
+ * 	Create and add one dev_info entry for @vendor, @model, @strflags or
+ * 	@flag. If @compatible, add to the tail of the list, do not space
+ * 	pad, and set devinfo->compatible. The scsi_static_device_list entries
+ * 	are added with @compatible 1 and @clfags NULL.
  *
  * Returns: 0 OK, -error on failure.
  **/
@@ -352,11 +350,11 @@ static int scsi_dev_info_list_add(int compatible, char *vendor, char *model,
  * @key:	specify list to use
  *
  * Description:
- *	Create and add one dev_info entry for @vendor, @model,
- *	@strflags or @flag in list specified by @key. If @compatible,
- *	add to the tail of the list, do not space pad, and set
- *	devinfo->compatible. The scsi_static_device_list entries are
- *	added with @compatible 1 and @clfags NULL.
+ * 	Create and add one dev_info entry for @vendor, @model,
+ * 	@strflags or @flag in list specified by @key. If @compatible,
+ * 	add to the tail of the list, do not space pad, and set
+ * 	devinfo->compatible. The scsi_static_device_list entries are
+ * 	added with @compatible 1 and @clfags NULL.
  *
  * Returns: 0 OK, -error on failure.
  **/
@@ -401,13 +399,13 @@ EXPORT_SYMBOL(scsi_dev_info_list_add_keyed);
 
 /**
  * scsi_dev_info_list_find - find a matching dev_info list entry.
- * @vendor:	full vendor string
- * @model:	full model (product) string
+ * @vendor:	vendor string
+ * @model:	model (product) string
  * @key:	specify list to use
  *
  * Description:
  *	Finds the first dev_info entry matching @vendor, @model
- *	in list specified by @key.
+ * 	in list specified by @key.
  *
  * Returns: pointer to matching entry, or ERR_PTR on failure.
  **/
@@ -417,7 +415,7 @@ static struct scsi_dev_info_list *scsi_dev_info_list_find(const char *vendor,
 	struct scsi_dev_info_list *devinfo;
 	struct scsi_dev_info_list_table *devinfo_table =
 		scsi_devinfo_lookup_by_key(key);
-	size_t vmax, mmax, mlen;
+	size_t vmax, mmax;
 	const char *vskip, *mskip;
 
 	if (IS_ERR(devinfo_table))
@@ -456,25 +454,22 @@ static struct scsi_dev_info_list *scsi_dev_info_list_find(const char *vendor,
 			    dev_info_list) {
 		if (devinfo->compatible) {
 			/*
-			 * vendor strings must be an exact match
+			 * Behave like the older version of get_device_flags.
 			 */
-			if (vmax != strlen(devinfo->vendor) ||
-			    memcmp(devinfo->vendor, vskip, vmax))
+			if (memcmp(devinfo->vendor, vskip, vmax) ||
+					(vmax < sizeof(devinfo->vendor) &&
+						devinfo->vendor[vmax]))
 				continue;
-
-			/*
-			 * @model specifies the full string, and
-			 * must be larger or equal to devinfo->model
-			 */
-			mlen = strlen(devinfo->model);
-			if (mmax < mlen || memcmp(devinfo->model, mskip, mlen))
+			if (memcmp(devinfo->model, mskip, mmax) ||
+					(mmax < sizeof(devinfo->model) &&
+						devinfo->model[mmax]))
 				continue;
 			return devinfo;
 		} else {
 			if (!memcmp(devinfo->vendor, vendor,
-				    sizeof(devinfo->vendor)) &&
-			    !memcmp(devinfo->model, model,
-				    sizeof(devinfo->model)))
+				     sizeof(devinfo->vendor)) &&
+			     !memcmp(devinfo->model, model,
+				      sizeof(devinfo->model)))
 				return devinfo;
 		}
 	}
@@ -513,10 +508,10 @@ EXPORT_SYMBOL(scsi_dev_info_list_del_keyed);
  * @dev_list:	string of device flags to add
  *
  * Description:
- *	Parse dev_list, and add entries to the scsi_dev_info_list.
- *	dev_list is of the form "vendor:product:flag,vendor:product:flag".
- *	dev_list is modified via strsep. Can be called for command line
- *	addition, for proc or mabye a sysfs interface.
+ * 	Parse dev_list, and add entries to the scsi_dev_info_list.
+ * 	dev_list is of the form "vendor:product:flag,vendor:product:flag".
+ * 	dev_list is modified via strsep. Can be called for command line
+ * 	addition, for proc or mabye a sysfs interface.
  *
  * Returns: 0 if OK, -error on failure.
  **/
@@ -706,7 +701,7 @@ static int proc_scsi_devinfo_open(struct inode *inode, struct file *file)
 	return seq_open(file, &scsi_devinfo_seq_ops);
 }
 
-/*
+/* 
  * proc_scsi_dev_info_write - allow additions to scsi_dev_info_list via /proc.
  *
  * Description: Adds a black/white list entry for vendor and model with an
@@ -845,8 +840,8 @@ EXPORT_SYMBOL(scsi_dev_info_remove_list);
  * scsi_init_devinfo - set up the dynamic device list.
  *
  * Description:
- *	Add command line entries from scsi_dev_flags, then add
- *	scsi_static_device_list entries to the scsi device info list.
+ * 	Add command line entries from scsi_dev_flags, then add
+ * 	scsi_static_device_list entries to the scsi device info list.
  */
 int __init scsi_init_devinfo(void)
 {

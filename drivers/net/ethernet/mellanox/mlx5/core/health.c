@@ -356,11 +356,10 @@ void mlx5_drain_health_wq(struct mlx5_core_dev *dev)
 void mlx5_drain_health_recovery(struct mlx5_core_dev *dev)
 {
 	struct mlx5_core_health *health = &dev->priv.health;
-	unsigned long flags;
 
-	spin_lock_irqsave(&health->wq_lock, flags);
+	spin_lock(&health->wq_lock);
 	set_bit(MLX5_DROP_NEW_RECOVERY_WORK, &health->flags);
-	spin_unlock_irqrestore(&health->wq_lock, flags);
+	spin_unlock(&health->wq_lock);
 	cancel_delayed_work_sync(&dev->priv.health.recover_work);
 }
 

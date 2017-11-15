@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef S390_CCWGROUP_H
 #define S390_CCWGROUP_H
 
@@ -42,7 +41,6 @@ struct ccwgroup_device {
  * @thaw: undo work done in @freeze
  * @restore: callback for restoring after hibernation
  * @driver: embedded driver structure
- * @ccw_driver: supported ccw_driver (optional)
  */
 struct ccwgroup_driver {
 	int (*setup) (struct ccwgroup_device *);
@@ -57,7 +55,6 @@ struct ccwgroup_driver {
 	int (*restore)(struct ccwgroup_device *);
 
 	struct device_driver driver;
-	struct ccw_driver *ccw_driver;
 };
 
 extern int  ccwgroup_driver_register   (struct ccwgroup_driver *cdriver);

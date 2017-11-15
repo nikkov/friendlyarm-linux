@@ -158,7 +158,7 @@ static void thread_wake_up(u_long data)
 	wake_up_interruptible_all(&speakup_event);
 }
 
-static DEFINE_TIMER(thread_timer, thread_wake_up);
+static DEFINE_TIMER(thread_timer, thread_wake_up, 0, 0);
 
 void synth_start(void)
 {

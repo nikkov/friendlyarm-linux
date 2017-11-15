@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the NXP ISP1761 device controller
  *
@@ -6,6 +5,10 @@
  *
  * Contacts:
  *	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -1328,9 +1331,9 @@ static irqreturn_t isp1760_udc_irq(int irq, void *dev)
 	return status ? IRQ_HANDLED : IRQ_NONE;
 }
 
-static void isp1760_udc_vbus_poll(struct timer_list *t)
+static void isp1760_udc_vbus_poll(unsigned long data)
 {
-	struct isp1760_udc *udc = from_timer(udc, t, vbus_timer);
+	struct isp1760_udc *udc = (struct isp1760_udc *)data;
 	unsigned long flags;
 
 	spin_lock_irqsave(&udc->lock, flags);
@@ -1449,7 +1452,8 @@ int isp1760_udc_register(struct isp1760_device *isp, int irq,
 	udc->regs = isp->regs;
 
 	spin_lock_init(&udc->lock);
-	timer_setup(&udc->vbus_timer, isp1760_udc_vbus_poll, 0);
+	setup_timer(&udc->vbus_timer, isp1760_udc_vbus_poll,
+		    (unsigned long)udc);
 
 	ret = isp1760_udc_init(udc);
 	if (ret < 0)

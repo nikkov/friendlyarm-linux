@@ -361,6 +361,17 @@ out:
 	return ret;
 }
 
+static bool scpsys_active_wakeup(struct device *dev)
+{
+	struct generic_pm_domain *genpd;
+	struct scp_domain *scpd;
+
+	genpd = pd_to_genpd(dev->pm_domain);
+	scpd = container_of(genpd, struct scp_domain, genpd);
+
+	return scpd->data->active_wakeup;
+}
+
 static void init_clks(struct platform_device *pdev, struct clk **clk)
 {
 	int i;
@@ -455,8 +466,7 @@ static struct scp *init_scp(struct platform_device *pdev,
 		genpd->name = data->name;
 		genpd->power_off = scpsys_power_off;
 		genpd->power_on = scpsys_power_on;
-		if (scpd->data->active_wakeup)
-			genpd->flags |= GENPD_FLAG_ACTIVE_WAKEUP;
+		genpd->dev_ops.active_wakeup = scpsys_active_wakeup;
 	}
 
 	return scp;

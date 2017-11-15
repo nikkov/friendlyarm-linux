@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 obj-y += core.o
 obj-y += hisilicon/
 obj-$(CONFIG_ARCH_STI) += sti/

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *	Linux Magic System Request Key Hacks
  *
@@ -246,10 +245,8 @@ static void sysrq_handle_showallcpus(int key)
 	 * architecture has no support for it:
 	 */
 	if (!trigger_all_cpu_backtrace()) {
-		struct pt_regs *regs = NULL;
+		struct pt_regs *regs = get_irq_regs();
 
-		if (in_irq())
-			regs = get_irq_regs();
 		if (regs) {
 			pr_info("CPU%d:\n", smp_processor_id());
 			show_regs(regs);
@@ -268,10 +265,7 @@ static struct sysrq_key_op sysrq_showallcpus_op = {
 
 static void sysrq_handle_showregs(int key)
 {
-	struct pt_regs *regs = NULL;
-
-	if (in_irq())
-		regs = get_irq_regs();
+	struct pt_regs *regs = get_irq_regs();
 	if (regs)
 		show_regs(regs);
 	perf_event_print_debug();
@@ -654,9 +648,9 @@ static void sysrq_parse_reset_sequence(struct sysrq_state *state)
 	state->reset_seq_version = sysrq_reset_seq_version;
 }
 
-static void sysrq_do_reset(struct timer_list *t)
+static void sysrq_do_reset(unsigned long _state)
 {
-	struct sysrq_state *state = from_timer(state, t, keyreset_timer);
+	struct sysrq_state *state = (struct sysrq_state *) _state;
 
 	state->reset_requested = true;
 
@@ -673,7 +667,7 @@ static void sysrq_handle_reset_request(struct sysrq_state *state)
 		mod_timer(&state->keyreset_timer,
 			jiffies + msecs_to_jiffies(sysrq_reset_downtime_ms));
 	else
-		sysrq_do_reset(&state->keyreset_timer);
+		sysrq_do_reset((unsigned long)state);
 }
 
 static void sysrq_detect_reset_sequence(struct sysrq_state *state,
@@ -909,7 +903,8 @@ static int sysrq_connect(struct input_handler *handler,
 	sysrq->handle.handler = handler;
 	sysrq->handle.name = "sysrq";
 	sysrq->handle.private = sysrq;
-	timer_setup(&sysrq->keyreset_timer, sysrq_do_reset, 0);
+	setup_timer(&sysrq->keyreset_timer,
+		    sysrq_do_reset, (unsigned long)sysrq);
 
 	error = input_register_handle(&sysrq->handle);
 	if (error) {

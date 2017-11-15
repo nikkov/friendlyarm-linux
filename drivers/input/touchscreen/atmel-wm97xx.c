@@ -208,12 +208,9 @@ static void atmel_wm97xx_acc_pen_up(struct wm97xx *wm)
 	}
 }
 
-static void atmel_wm97xx_pen_timer(struct timer_list *t)
+static void atmel_wm97xx_pen_timer(unsigned long data)
 {
-	struct atmel_wm97xx *atmel_wm97xx = from_timer(atmel_wm97xx, t,
-						       pen_timer);
-
-	atmel_wm97xx_acc_pen_up(atmel_wm97xx->wm);
+	atmel_wm97xx_acc_pen_up((struct wm97xx *)data);
 }
 
 static int atmel_wm97xx_acc_startup(struct wm97xx *wm)
@@ -351,7 +348,8 @@ static int __init atmel_wm97xx_probe(struct platform_device *pdev)
 	atmel_wm97xx->gpio_pen	= atmel_gpio_line;
 	atmel_wm97xx->gpio_irq	= gpio_to_irq(atmel_wm97xx->gpio_pen);
 
-	timer_setup(&atmel_wm97xx->pen_timer, atmel_wm97xx_pen_timer, 0);
+	setup_timer(&atmel_wm97xx->pen_timer, atmel_wm97xx_pen_timer,
+			(unsigned long)wm);
 
 	ret = request_irq(atmel_wm97xx->ac97c_irq,
 			  atmel_wm97xx_channel_b_interrupt,

@@ -35,7 +35,6 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
-#include <linux/bitops.h>
 
 #define GRGPIO_MAX_NGPIO 32
 
@@ -97,11 +96,12 @@ static void grgpio_set_imask(struct grgpio_priv *priv, unsigned int offset,
 			     int val)
 {
 	struct gpio_chip *gc = &priv->gc;
+	unsigned long mask = gc->pin2mask(gc, offset);
 
 	if (val)
-		priv->imask |= BIT(offset);
+		priv->imask |= mask;
 	else
-		priv->imask &= ~BIT(offset);
+		priv->imask &= ~mask;
 	gc->write_reg(priv->regs + GRGPIO_IMASK, priv->imask);
 }
 

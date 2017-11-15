@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Module: eeprom_93xx46
  * platform description for 93xx46 EEPROMs.

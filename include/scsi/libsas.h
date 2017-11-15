@@ -60,32 +60,38 @@ enum sas_phy_type {
  * so when updating/adding events here, please also
  * update the other file too.
  */
+enum ha_event {
+	HAE_RESET             = 0U,
+	HA_NUM_EVENTS         = 1,
+};
+
 enum port_event {
 	PORTE_BYTES_DMAED     = 0U,
-	PORTE_BROADCAST_RCVD,
-	PORTE_LINK_RESET_ERR,
-	PORTE_TIMER_EVENT,
-	PORTE_HARD_RESET,
-	PORT_NUM_EVENTS,
+	PORTE_BROADCAST_RCVD  = 1,
+	PORTE_LINK_RESET_ERR  = 2,
+	PORTE_TIMER_EVENT     = 3,
+	PORTE_HARD_RESET      = 4,
+	PORT_NUM_EVENTS       = 5,
 };
 
 enum phy_event {
 	PHYE_LOSS_OF_SIGNAL   = 0U,
-	PHYE_OOB_DONE,
-	PHYE_OOB_ERROR,
-	PHYE_SPINUP_HOLD,             /* hot plug SATA, no COMWAKE sent */
-	PHYE_RESUME_TIMEOUT,
-	PHY_NUM_EVENTS,
+	PHYE_OOB_DONE         = 1,
+	PHYE_OOB_ERROR        = 2,
+	PHYE_SPINUP_HOLD      = 3, /* hot plug SATA, no COMWAKE sent */
+	PHYE_RESUME_TIMEOUT   = 4,
+	PHY_NUM_EVENTS        = 5,
 };
 
 enum discover_event {
 	DISCE_DISCOVER_DOMAIN   = 0U,
-	DISCE_REVALIDATE_DOMAIN,
-	DISCE_PROBE,
-	DISCE_SUSPEND,
-	DISCE_RESUME,
-	DISCE_DESTRUCT,
-	DISC_NUM_EVENTS,
+	DISCE_REVALIDATE_DOMAIN = 1,
+	DISCE_PORT_GONE         = 2,
+	DISCE_PROBE		= 3,
+	DISCE_SUSPEND		= 4,
+	DISCE_RESUME		= 5,
+	DISCE_DESTRUCT		= 6,
+	DISC_NUM_EVENTS		= 7,
 };
 
 /* ---------- Expander Devices ---------- */
@@ -255,6 +261,8 @@ struct sas_discovery {
 /* The port struct is Class:RW, driver:RO */
 struct asd_sas_port {
 /* private: */
+	struct completion port_gone_completion;
+
 	struct sas_discovery disc;
 	struct domain_device *port_dev;
 	spinlock_t dev_list_lock;
@@ -354,6 +362,18 @@ struct scsi_core {
 
 };
 
+struct sas_ha_event {
+	struct sas_work work;
+	struct sas_ha_struct *ha;
+};
+
+static inline struct sas_ha_event *to_sas_ha_event(struct work_struct *work)
+{
+	struct sas_ha_event *ev = container_of(work, typeof(*ev), work.work);
+
+	return ev;
+}
+
 enum sas_ha_state {
 	SAS_HA_REGISTERED,
 	SAS_HA_DRAINING,
@@ -363,6 +383,9 @@ enum sas_ha_state {
 
 struct sas_ha_struct {
 /* private: */
+	struct sas_ha_event ha_events[HA_NUM_EVENTS];
+	unsigned long	 pending;
+
 	struct list_head  defer_q; /* work queued while draining */
 	struct mutex	  drain_mutex;
 	unsigned long	  state;
@@ -392,6 +415,7 @@ struct sas_ha_struct {
 				* their siblings when forming wide ports */
 
 	/* LLDD calls these to notify the class of an event. */
+	int (*notify_ha_event)(struct sas_ha_struct *, enum ha_event);
 	int (*notify_port_event)(struct asd_sas_phy *, enum port_event);
 	int (*notify_phy_event)(struct asd_sas_phy *, enum phy_event);
 
@@ -605,7 +629,6 @@ struct sas_task_slow {
 	 */
 	struct timer_list     timer;
 	struct completion     completion;
-	struct sas_task       *task;
 };
 
 #define SAS_TASK_STATE_PENDING      1

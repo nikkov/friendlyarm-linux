@@ -78,7 +78,7 @@ static int simple_thread_fn(void *arg)
 }
 
 static DEFINE_MUTEX(thread_mutex);
-static int simple_thread_cnt;
+static bool simple_thread_cnt;
 
 int foo_bar_reg(void)
 {

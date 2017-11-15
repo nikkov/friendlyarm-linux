@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *	Low-Level PCI Support for PC -- Routing of Interrupts
  *

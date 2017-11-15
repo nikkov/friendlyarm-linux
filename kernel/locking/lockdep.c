@@ -76,19 +76,6 @@ module_param(lock_stat, int, 0644);
 #define lock_stat 0
 #endif
 
-#ifdef CONFIG_BOOTPARAM_LOCKDEP_CROSSRELEASE_FULLSTACK
-static int crossrelease_fullstack = 1;
-#else
-static int crossrelease_fullstack;
-#endif
-static int __init allow_crossrelease_fullstack(char *str)
-{
-	crossrelease_fullstack = 1;
-	return 0;
-}
-
-early_param("crossrelease_fullstack", allow_crossrelease_fullstack);
-
 /*
  * lockdep_lock: protects the lockdep graph, the hashes and the
  *               class/list/hash allocators.
@@ -4876,14 +4863,8 @@ static void add_xhlock(struct held_lock *hlock)
 	xhlock->trace.nr_entries = 0;
 	xhlock->trace.max_entries = MAX_XHLOCK_TRACE_ENTRIES;
 	xhlock->trace.entries = xhlock->trace_entries;
-
-	if (crossrelease_fullstack) {
-		xhlock->trace.skip = 3;
-		save_stack_trace(&xhlock->trace);
-	} else {
-		xhlock->trace.nr_entries = 1;
-		xhlock->trace.entries[0] = hlock->acquire_ip;
-	}
+	xhlock->trace.skip = 3;
+	save_stack_trace(&xhlock->trace);
 }
 
 static inline int same_context_xhlock(struct hist_lock *xhlock)

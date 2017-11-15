@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __TIMER_OF_H__
 #define __TIMER_OF_H__
 
@@ -67,7 +66,4 @@ static inline unsigned long timer_of_period(struct timer_of *to)
 
 extern int __init timer_of_init(struct device_node *np,
 				struct timer_of *to);
-
-extern void timer_of_exit(struct timer_of *to);
-
 #endif

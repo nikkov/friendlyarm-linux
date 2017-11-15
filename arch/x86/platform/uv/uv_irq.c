@@ -127,11 +127,10 @@ static void uv_domain_free(struct irq_domain *domain, unsigned int virq,
  * Re-target the irq to the specified CPU and enable the specified MMR located
  * on the specified blade to allow the sending of MSIs to the specified CPU.
  */
-static int uv_domain_activate(struct irq_domain *domain,
-			      struct irq_data *irq_data, bool early)
+static void uv_domain_activate(struct irq_domain *domain,
+			       struct irq_data *irq_data)
 {
 	uv_program_mmr(irqd_cfg(irq_data), irq_data->chip_data);
-	return 0;
 }
 
 /*

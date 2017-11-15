@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Kernel interface for the s390 arch_random_* functions
  *
@@ -28,42 +27,42 @@ static void s390_arch_random_generate(u8 *buf, unsigned int nbytes)
 
 static inline bool arch_has_random(void)
 {
-	return false;
-}
-
-static inline bool arch_has_random_seed(void)
-{
 	if (static_branch_likely(&s390_arch_random_available))
 		return true;
 	return false;
 }
 
+static inline bool arch_has_random_seed(void)
+{
+	return arch_has_random();
+}
+
 static inline bool arch_get_random_long(unsigned long *v)
 {
+	if (static_branch_likely(&s390_arch_random_available)) {
+		s390_arch_random_generate((u8 *)v, sizeof(*v));
+		return true;
+	}
 	return false;
 }
 
 static inline bool arch_get_random_int(unsigned int *v)
 {
+	if (static_branch_likely(&s390_arch_random_available)) {
+		s390_arch_random_generate((u8 *)v, sizeof(*v));
+		return true;
+	}
 	return false;
 }
 
 static inline bool arch_get_random_seed_long(unsigned long *v)
 {
-	if (static_branch_likely(&s390_arch_random_available)) {
-		s390_arch_random_generate((u8 *)v, sizeof(*v));
-		return true;
-	}
-	return false;
+	return arch_get_random_long(v);
 }
 
 static inline bool arch_get_random_seed_int(unsigned int *v)
 {
-	if (static_branch_likely(&s390_arch_random_available)) {
-		s390_arch_random_generate((u8 *)v, sizeof(*v));
-		return true;
-	}
-	return false;
+	return arch_get_random_int(v);
 }
 
 #endif /* CONFIG_ARCH_RANDOM */

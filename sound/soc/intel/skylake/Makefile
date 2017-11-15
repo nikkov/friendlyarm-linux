@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 snd-soc-skl-objs := skl.o skl-pcm.o skl-nhlt.o skl-messages.o \
 skl-topology.o
 

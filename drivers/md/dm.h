@@ -19,7 +19,6 @@
 #include <linux/hdreg.h>
 #include <linux/completion.h>
 #include <linux/kobject.h>
-#include <linux/refcount.h>
 
 #include "dm-stats.h"
 
@@ -39,7 +38,7 @@
  */
 struct dm_dev_internal {
 	struct list_head list;
-	refcount_t count;
+	atomic_t count;
 	struct dm_dev *dm_dev;
 };
 

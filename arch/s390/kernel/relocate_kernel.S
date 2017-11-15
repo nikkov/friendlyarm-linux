@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright IBM Corp. 2005
  *
@@ -29,6 +28,7 @@
 ENTRY(relocate_kernel)
 		basr	%r13,0		# base address
 	.base:
+		stnsm	sys_msk-.base(%r13),0xfb	# disable DAT
 		stctg	%c0,%c15,ctlregs-.base(%r13)
 		stmg	%r0,%r15,gprregs-.base(%r13)
 		lghi	%r0,3
@@ -102,6 +102,8 @@ ENTRY(relocate_kernel)
 		.align	8
 	load_psw:
 		.long	0x00080000,0x80000000
+	sys_msk:
+		.quad	0
 	ctlregs:
 		.rept	16
 		.quad	0

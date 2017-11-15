@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 # Built-in dtb
 builtindtb-y		:= nsim_700
 
@@ -11,6 +10,8 @@ dtb-y := $(builtindtb-y).dtb
 
 .SECONDARY: $(obj)/$(builtindtb-y).dtb.S
 
-# for CONFIG_OF_ALL_DTBS test
-dtstree	:= $(srctree)/$(src)
-dtb-	:= $(patsubst $(dtstree)/%.dts,%.dtb, $(wildcard $(dtstree)/*.dts))
+dtstree		:= $(srctree)/$(src)
+dtb-$(CONFIG_OF_ALL_DTBS) := $(patsubst $(dtstree)/%.dts,%.dtb, $(wildcard $(dtstree)/*.dts))
+
+always := $(dtb-y)
+clean-files := *.dtb  *.dtb.S

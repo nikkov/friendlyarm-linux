@@ -1106,11 +1106,18 @@ static int wdt87xx_ts_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = devm_device_add_group(&client->dev, &wdt87xx_attr_group);
+	error = sysfs_create_group(&client->dev.kobj, &wdt87xx_attr_group);
 	if (error) {
 		dev_err(&client->dev, "create sysfs failed: %d\n", error);
 		return error;
 	}
+
+	return 0;
+}
+
+static int wdt87xx_ts_remove(struct i2c_client *client)
+{
+	sysfs_remove_group(&client->dev.kobj, &wdt87xx_attr_group);
 
 	return 0;
 }
@@ -1172,6 +1179,7 @@ MODULE_DEVICE_TABLE(acpi, wdt87xx_acpi_id);
 
 static struct i2c_driver wdt87xx_driver = {
 	.probe		= wdt87xx_ts_probe,
+	.remove		= wdt87xx_ts_remove,
 	.id_table	= wdt87xx_dev_id,
 	.driver	= {
 		.name	= WDT87XX_NAME,

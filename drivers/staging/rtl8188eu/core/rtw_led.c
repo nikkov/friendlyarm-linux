@@ -22,9 +22,9 @@
 /*		Callback function of LED BlinkTimer, */
 /*		it just schedules to corresponding BlinkWorkItem/led_blink_hdl */
 /*  */
-static void BlinkTimerCallback(struct timer_list *t)
+void BlinkTimerCallback(unsigned long data)
 {
-	struct LED_871x *pLed = from_timer(pLed, t, BlinkTimer);
+	struct LED_871x *pLed = (struct LED_871x *)data;
 	struct adapter *padapter = pLed->padapter;
 
 	if ((padapter->bSurpriseRemoved) || (padapter->bDriverStopped))
@@ -73,7 +73,8 @@ void InitLed871x(struct adapter *padapter, struct LED_871x *pLed)
 
 	ResetLedStatus(pLed);
 
-	timer_setup(&pLed->BlinkTimer, BlinkTimerCallback, 0);
+	setup_timer(&pLed->BlinkTimer, BlinkTimerCallback,
+		    (unsigned long)pLed);
 
 	INIT_WORK(&pLed->BlinkWorkItem, BlinkWorkItemCallback);
 }

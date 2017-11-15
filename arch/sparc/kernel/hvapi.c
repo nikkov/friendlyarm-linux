@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* hvapi.c: Hypervisor API management.
  *
  * Copyright (C) 2007 David S. Miller <davem@davemloft.net>

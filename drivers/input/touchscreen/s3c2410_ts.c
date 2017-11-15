@@ -145,7 +145,7 @@ static void touch_timer_fire(unsigned long data)
 	}
 }
 
-static DEFINE_TIMER(touch_timer, touch_timer_fire);
+static DEFINE_TIMER(touch_timer, touch_timer_fire, 0, 0);
 
 /**
  * stylus_irq - touchscreen stylus event interrupt

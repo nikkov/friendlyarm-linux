@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/kernel/irq/proc.c
  *
@@ -155,9 +154,8 @@ static ssize_t write_irq_affinity(int type, struct file *file,
 		 */
 		err = irq_select_affinity_usr(irq) ? -EINVAL : count;
 	} else {
-		err = irq_set_affinity(irq, new_value);
-		if (!err)
-			err = count;
+		irq_set_affinity(irq, new_value);
+		err = count;
 	}
 
 free_cpumask:

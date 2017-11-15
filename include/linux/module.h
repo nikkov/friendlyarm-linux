@@ -639,8 +639,6 @@ static inline bool is_livepatch_module(struct module *mod)
 }
 #endif /* CONFIG_LIVEPATCH */
 
-bool is_module_sig_enforced(void);
-
 #else /* !CONFIG_MODULES... */
 
 static inline struct module *__module_address(unsigned long addr)
@@ -751,11 +749,6 @@ static inline void print_modules(void)
 }
 
 static inline bool module_requested_async_probing(struct module *module)
-{
-	return false;
-}
-
-static inline bool is_module_sig_enforced(void)
 {
 	return false;
 }

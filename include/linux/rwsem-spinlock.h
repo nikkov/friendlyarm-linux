@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /* rwsem-spinlock.h: fallback C implementation
  *
  * Copyright (c) 2001   David Howells (dhowells@redhat.com).

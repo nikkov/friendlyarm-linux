@@ -330,7 +330,7 @@ acpi_ex_do_logical_op(u16 opcode,
 	case ACPI_TYPE_INTEGER:
 
 		status = acpi_ex_convert_to_integer(operand1, &local_operand1,
-						    ACPI_IMPLICIT_CONVERSION);
+						    ACPI_STRTOUL_BASE16);
 		break;
 
 	case ACPI_TYPE_STRING:

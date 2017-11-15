@@ -55,18 +55,17 @@
 #include <asm/mmu_context.h>
 #include <asm/cpcmd.h>
 #include <asm/lowcore.h>
-#include <asm/nmi.h>
 #include <asm/irq.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include <asm/sections.h>
 #include <asm/ebcdic.h>
+#include <asm/kvm_virtio.h>
 #include <asm/diag.h>
 #include <asm/os_info.h>
 #include <asm/sclp.h>
 #include <asm/sysinfo.h>
 #include <asm/numa.h>
-#include <asm/alternative.h>
 #include "entry.h"
 
 /*
@@ -340,8 +339,16 @@ static void __init setup_lowcore(void)
 	lc->stfl_fac_list = S390_lowcore.stfl_fac_list;
 	memcpy(lc->stfle_fac_list, S390_lowcore.stfle_fac_list,
 	       MAX_FACILITY_BIT/8);
-	nmi_alloc_boot_cpu(lc);
-	vdso_alloc_boot_cpu(lc);
+	if (MACHINE_HAS_VX || MACHINE_HAS_GS) {
+		unsigned long bits, size;
+
+		bits = MACHINE_HAS_GS ? 11 : 10;
+		size = 1UL << bits;
+		lc->mcesad = (__u64) memblock_virt_alloc(size, size);
+		if (MACHINE_HAS_GS)
+			lc->mcesad |= bits;
+	}
+	lc->vdso_per_cpu_data = (unsigned long) &lc->paste[0];
 	lc->sync_enter_timer = S390_lowcore.sync_enter_timer;
 	lc->async_enter_timer = S390_lowcore.async_enter_timer;
 	lc->exit_timer = S390_lowcore.exit_timer;
@@ -373,8 +380,6 @@ static void __init setup_lowcore(void)
 
 #ifdef CONFIG_SMP
 	lc->spinlock_lockval = arch_spin_lockval(0);
-	lc->spinlock_index = 0;
-	arch_spin_lock_setup(0);
 #endif
 
 	set_prefix((u32)(unsigned long) lc);
@@ -759,7 +764,7 @@ static int __init setup_hwcaps(void)
 	/*
 	 * Transactional execution support HWCAP_S390_TE is bit 10.
 	 */
-	if (MACHINE_HAS_TE)
+	if (test_facility(50) && test_facility(73))
 		elf_hwcap |= HWCAP_S390_TE;
 
 	/*
@@ -949,8 +954,6 @@ void __init setup_arch(char **cmdline_p)
         /* Setup default console */
 	conmode_default();
 	set_preferred_console();
-
-	apply_alternative_instructions();
 
 	/* Setup zfcpdump support */
 	setup_zfcpdump();

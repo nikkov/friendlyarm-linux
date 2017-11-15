@@ -1367,12 +1367,13 @@ static void __start_timer(struct timer_list *t, unsigned long interval)
 	local_irq_restore(flags);
 }
 
-static void mce_timer_fn(struct timer_list *t)
+static void mce_timer_fn(unsigned long data)
 {
-	struct timer_list *cpu_t = this_cpu_ptr(&mce_timer);
+	struct timer_list *t = this_cpu_ptr(&mce_timer);
+	int cpu = smp_processor_id();
 	unsigned long iv;
 
-	WARN_ON(cpu_t != t);
+	WARN_ON(cpu != data);
 
 	iv = __this_cpu_read(mce_next_interval);
 
@@ -1762,15 +1763,17 @@ static void mce_start_timer(struct timer_list *t)
 static void __mcheck_cpu_setup_timer(void)
 {
 	struct timer_list *t = this_cpu_ptr(&mce_timer);
+	unsigned int cpu = smp_processor_id();
 
-	timer_setup(t, mce_timer_fn, TIMER_PINNED);
+	setup_pinned_timer(t, mce_timer_fn, cpu);
 }
 
 static void __mcheck_cpu_init_timer(void)
 {
 	struct timer_list *t = this_cpu_ptr(&mce_timer);
+	unsigned int cpu = smp_processor_id();
 
-	timer_setup(t, mce_timer_fn, TIMER_PINNED);
+	setup_pinned_timer(t, mce_timer_fn, cpu);
 	mce_start_timer(t);
 }
 

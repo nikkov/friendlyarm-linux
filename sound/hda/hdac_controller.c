@@ -319,8 +319,7 @@ int snd_hdac_bus_parse_capabilities(struct hdac_bus *bus)
 			break;
 
 		default:
-			dev_err(bus->dev, "Unknown capability %d\n", cur_cap);
-			cur_cap = 0;
+			dev_dbg(bus->dev, "Unknown capability %d\n", cur_cap);
 			break;
 		}
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef MFD_TMIO_H
 #define MFD_TMIO_H
 

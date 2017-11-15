@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Prolific PL2303 USB to serial adaptor driver
  *
@@ -6,6 +5,10 @@
  * Copyright (C) 2003 IBM Corp.
  *
  * Original driver for 2.2.x by anonymous
+ *
+ *	This program is free software; you can redistribute it and/or
+ *	modify it under the terms of the GNU General Public License version
+ *	2 as published by the Free Software Foundation.
  *
  * See Documentation/usb/usb-serial.txt for more information on using this
  * driver
@@ -1022,4 +1025,4 @@ static struct usb_serial_driver * const serial_drivers[] = {
 module_usb_serial_driver(serial_drivers, id_table);
 
 MODULE_DESCRIPTION("Prolific PL2303 USB to serial adaptor driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

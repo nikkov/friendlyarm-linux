@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* Various workarounds for chipset bugs.
    This code runs very early and can't use the regular PCI subsystem
    The entries are keyed to PCI bridges which usually identify chipsets

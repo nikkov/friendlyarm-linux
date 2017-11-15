@@ -208,7 +208,7 @@ static int auxtrace_queues__grow(struct auxtrace_queues *queues,
 
 static void *auxtrace_copy_data(u64 size, struct perf_session *session)
 {
-	int fd = perf_data__fd(session->data);
+	int fd = perf_data_file__fd(session->file);
 	void *p;
 	ssize_t ret;
 
@@ -305,7 +305,7 @@ static int auxtrace_queues__add_event_buffer(struct auxtrace_queues *queues,
 	if (session->one_mmap) {
 		buffer->data = buffer->data_offset - session->one_mmap_offset +
 			       session->one_mmap_addr;
-	} else if (perf_data__is_pipe(session->data)) {
+	} else if (perf_data_file__is_pipe(session->file)) {
 		buffer->data = auxtrace_copy_data(buffer->size, session);
 		if (!buffer->data)
 			return -ENOMEM;

@@ -1,5 +1,4 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
 #
 # This test runs on Intel x86 based hardware which support the intel_pstate
 # driver.  The test checks the frequency settings from the maximum turbo

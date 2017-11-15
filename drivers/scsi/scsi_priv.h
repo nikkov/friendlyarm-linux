@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SCSI_PRIV_H
 #define _SCSI_PRIV_H
 
@@ -177,10 +176,10 @@ extern struct async_domain scsi_sd_probe_domain;
 
 /* scsi_dh.c */
 #ifdef CONFIG_SCSI_DH
-void scsi_dh_add_device(struct scsi_device *sdev);
+int scsi_dh_add_device(struct scsi_device *sdev);
 void scsi_dh_release_device(struct scsi_device *sdev);
 #else
-static inline void scsi_dh_add_device(struct scsi_device *sdev) { }
+static inline int scsi_dh_add_device(struct scsi_device *sdev) { return 0; }
 static inline void scsi_dh_release_device(struct scsi_device *sdev) { }
 #endif
 static inline void scsi_dh_remove_device(struct scsi_device *sdev) { }

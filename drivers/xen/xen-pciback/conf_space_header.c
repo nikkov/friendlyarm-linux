@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * PCI Backend - Handles the virtual fields in the configuration space headers.
  *

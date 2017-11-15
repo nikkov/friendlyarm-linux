@@ -928,12 +928,15 @@ MODULE_DEVICE_TABLE(of, omap_des_of_match);
 static int omap_des_get_of(struct omap_des_dev *dd,
 		struct platform_device *pdev)
 {
+	const struct of_device_id *match;
 
-	dd->pdata = of_device_get_match_data(&pdev->dev);
-	if (!dd->pdata) {
+	match = of_match_device(of_match_ptr(omap_des_of_match), &pdev->dev);
+	if (!match) {
 		dev_err(&pdev->dev, "no compatible OF match\n");
 		return -EINVAL;
 	}
+
+	dd->pdata = match->data;
 
 	return 0;
 }

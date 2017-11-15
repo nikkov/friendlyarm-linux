@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *  S390 version
  *
@@ -316,8 +315,7 @@
 #define __NR_pwritev2		377
 #define __NR_s390_guarded_storage	378
 #define __NR_statx		379
-#define __NR_s390_sthyi		380
-#define NR_syscalls 381
+#define NR_syscalls 380
 
 /* 
  * There are some system calls that are not present on 64 bit, some

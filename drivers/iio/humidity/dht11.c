@@ -284,6 +284,7 @@ err:
 }
 
 static const struct iio_info dht11_iio_info = {
+	.driver_module		= THIS_MODULE,
 	.read_raw		= dht11_read_raw,
 };
 

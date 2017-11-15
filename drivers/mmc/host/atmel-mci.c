@@ -732,11 +732,11 @@ static inline unsigned int atmci_convert_chksize(struct atmel_mci *host,
 		return 0;
 }
 
-static void atmci_timeout_timer(struct timer_list *t)
+static void atmci_timeout_timer(unsigned long data)
 {
 	struct atmel_mci *host;
 
-	host = from_timer(host, t, timer);
+	host = (struct atmel_mci *)data;
 
 	dev_dbg(&host->pdev->dev, "software timeout\n");
 
@@ -1661,9 +1661,9 @@ static void atmci_command_complete(struct atmel_mci *host,
 		cmd->error = 0;
 }
 
-static void atmci_detect_change(struct timer_list *t)
+static void atmci_detect_change(unsigned long data)
 {
-	struct atmel_mci_slot	*slot = from_timer(slot, t, detect_timer);
+	struct atmel_mci_slot	*slot = (struct atmel_mci_slot *)data;
 	bool			present;
 	bool			present_old;
 
@@ -2349,7 +2349,8 @@ static int atmci_init_slot(struct atmel_mci *host,
 	if (gpio_is_valid(slot->detect_pin)) {
 		int ret;
 
-		timer_setup(&slot->detect_timer, atmci_detect_change, 0);
+		setup_timer(&slot->detect_timer, atmci_detect_change,
+				(unsigned long)slot);
 
 		ret = request_irq(gpio_to_irq(slot->detect_pin),
 				atmci_detect_interrupt,
@@ -2562,7 +2563,7 @@ static int atmci_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, host);
 
-	timer_setup(&host->timer, atmci_timeout_timer, 0);
+	setup_timer(&host->timer, atmci_timeout_timer, (unsigned long)host);
 
 	pm_runtime_get_noresume(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);

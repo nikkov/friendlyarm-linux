@@ -177,7 +177,7 @@ static int sas_smp_dispatch(struct bsg_job *job)
 	if (!scsi_is_host_device(job->dev))
 		rphy = dev_to_rphy(job->dev);
 
-	if (!job->reply_payload.payload_len) {
+	if (!job->req->next_rq) {
 		dev_warn(job->dev, "space for a smp response is missing\n");
 		bsg_job_done(job, -EINVAL, 0);
 		return 0;

@@ -891,7 +891,7 @@ static void hal_ReadEFuse_WiFi(
 		return;
 	}
 
-	efuseTbl = rtw_malloc(EFUSE_MAX_MAP_LEN);
+	efuseTbl = (u8 *)rtw_malloc(EFUSE_MAX_MAP_LEN);
 	if (efuseTbl == NULL) {
 		DBG_8192C("%s: alloc efuseTbl fail!\n", __func__);
 		return;

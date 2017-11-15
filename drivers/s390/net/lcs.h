@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*lcs.h*/
 
 #include <linux/interrupt.h>
@@ -276,7 +275,6 @@ struct lcs_reply {
 	void (*callback)(struct lcs_card *, struct lcs_cmd *);
 	wait_queue_head_t wait_q;
 	struct lcs_card *card;
-	struct timer_list timer;
 	int received;
 	int rc;
 };

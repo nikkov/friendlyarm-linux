@@ -201,7 +201,8 @@ unsigned int pblk_rb_read_commit(struct pblk_rb *rb, unsigned int nr_entries)
 	return subm;
 }
 
-static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int to_update)
+static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int *l2p_upd,
+				unsigned int to_update)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct pblk_line *line;
@@ -212,7 +213,7 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int to_update)
 	int flags;
 
 	for (i = 0; i < to_update; i++) {
-		entry = &rb->entries[rb->l2p_update];
+		entry = &rb->entries[*l2p_upd];
 		w_ctx = &entry->w_ctx;
 
 		flags = READ_ONCE(entry->w_ctx.flags);
@@ -229,7 +230,7 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int to_update)
 		line = &pblk->lines[pblk_tgt_ppa_to_line(w_ctx->ppa)];
 		kref_put(&line->ref, pblk_line_put);
 		clean_wctx(w_ctx);
-		rb->l2p_update = (rb->l2p_update + 1) & (rb->nr_entries - 1);
+		*l2p_upd = (*l2p_upd + 1) & (rb->nr_entries - 1);
 	}
 
 	pblk_rl_out(&pblk->rl, user_io, gc_io);
@@ -257,7 +258,7 @@ static int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
 
 	count = nr_entries - space;
 	/* l2p_update used exclusively under rb->w_lock */
-	ret = __pblk_rb_update_l2p(rb, count);
+	ret = __pblk_rb_update_l2p(rb, &rb->l2p_update, count);
 
 out:
 	return ret;
@@ -279,7 +280,7 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
 	sync = smp_load_acquire(&rb->sync);
 
 	to_update = pblk_rb_ring_count(sync, rb->l2p_update, rb->nr_entries);
-	__pblk_rb_update_l2p(rb, to_update);
+	__pblk_rb_update_l2p(rb, &rb->l2p_update, to_update);
 
 	spin_unlock(&rb->w_lock);
 }
@@ -324,8 +325,8 @@ void pblk_rb_write_entry_user(struct pblk_rb *rb, void *data,
 }
 
 void pblk_rb_write_entry_gc(struct pblk_rb *rb, void *data,
-			    struct pblk_w_ctx w_ctx, struct pblk_line *line,
-			    u64 paddr, unsigned int ring_pos)
+			    struct pblk_w_ctx w_ctx, struct pblk_line *gc_line,
+			    unsigned int ring_pos)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct pblk_rb_entry *entry;
@@ -340,7 +341,7 @@ void pblk_rb_write_entry_gc(struct pblk_rb *rb, void *data,
 
 	__pblk_rb_write_entry(rb, data, w_ctx, entry);
 
-	if (!pblk_update_map_gc(pblk, w_ctx.lba, entry->cacheline, line, paddr))
+	if (!pblk_update_map_gc(pblk, w_ctx.lba, entry->cacheline, gc_line))
 		entry->w_ctx.lba = ADDR_EMPTY;
 
 	flags = w_ctx.flags | PBLK_WRITTEN_DATA;
@@ -354,6 +355,7 @@ static int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio,
 {
 	struct pblk_rb_entry *entry;
 	unsigned int subm, sync_point;
+	int flags;
 
 	subm = READ_ONCE(rb->subm);
 
@@ -366,6 +368,12 @@ static int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio,
 
 	sync_point = (pos == 0) ? (rb->nr_entries - 1) : (pos - 1);
 	entry = &rb->entries[sync_point];
+
+	flags = READ_ONCE(entry->w_ctx.flags);
+	flags |= PBLK_FLUSH_ENTRY;
+
+	/* Release flags on context. Protect from writes */
+	smp_store_release(&entry->w_ctx.flags, flags);
 
 	/* Protect syncs */
 	smp_store_release(&rb->sync_point, sync_point);
@@ -446,7 +454,6 @@ static int pblk_rb_may_write_flush(struct pblk_rb *rb, unsigned int nr_entries,
 
 	/* Protect from read count */
 	smp_store_release(&rb->mem, mem);
-
 	return 1;
 }
 
@@ -551,13 +558,12 @@ out:
  * persist data on the write buffer to the media.
  */
 unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct nvm_rq *rqd,
-				 unsigned int pos, unsigned int nr_entries,
-				 unsigned int count)
+				 struct bio *bio, unsigned int pos,
+				 unsigned int nr_entries, unsigned int count)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct request_queue *q = pblk->dev->q;
 	struct pblk_c_ctx *c_ctx = nvm_rq_to_pdu(rqd);
-	struct bio *bio = rqd->bio;
 	struct pblk_rb_entry *entry;
 	struct page *page;
 	unsigned int pad = 0, to_read = nr_entries;

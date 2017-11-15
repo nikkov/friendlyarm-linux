@@ -337,6 +337,7 @@ static int vc_vchi_audio_deinit(struct bcm2835_audio_instance *instance)
 {
 	unsigned int i;
 
+
 	if (!instance) {
 		LOG_ERR("%s: invalid handle %p\n", __func__, instance);
 
@@ -368,6 +369,7 @@ static int vc_vchi_audio_deinit(struct bcm2835_audio_instance *instance)
 
 	kfree(instance);
 
+
 	return 0;
 }
 
@@ -379,6 +381,7 @@ static int bcm2835_audio_open_connection(struct bcm2835_alsa_stream *alsa_stream
 	struct bcm2835_audio_instance *instance =
 		(struct bcm2835_audio_instance *)alsa_stream->instance;
 	int ret;
+
 
 	LOG_INFO("%s: start\n", __func__);
 	BUG_ON(instance);
@@ -435,6 +438,7 @@ int bcm2835_audio_open(struct bcm2835_alsa_stream *alsa_stream)
 	int status;
 	int ret;
 
+
 	my_workqueue_init(alsa_stream);
 
 	ret = bcm2835_audio_open_connection(alsa_stream);
@@ -481,6 +485,7 @@ static int bcm2835_audio_set_ctls_chan(struct bcm2835_alsa_stream *alsa_stream,
 	struct bcm2835_audio_instance *instance = alsa_stream->instance;
 	int status;
 	int ret;
+
 
 	LOG_INFO(" Setting ALSA dest(%d), volume(%d)\n",
 		 chip->dest, chip->volume);
@@ -565,6 +570,7 @@ int bcm2835_audio_set_params(struct bcm2835_alsa_stream *alsa_stream,
 	int status;
 	int ret;
 
+
 	LOG_INFO(" Setting ALSA channels(%d), samplerate(%d), bits-per-sample(%d)\n",
 		 channels, samplerate, bps);
 
@@ -625,6 +631,7 @@ unlock:
 int bcm2835_audio_setup(struct bcm2835_alsa_stream *alsa_stream)
 {
 
+
 	return 0;
 }
 
@@ -634,6 +641,7 @@ static int bcm2835_audio_start_worker(struct bcm2835_alsa_stream *alsa_stream)
 	struct bcm2835_audio_instance *instance = alsa_stream->instance;
 	int status;
 	int ret;
+
 
 	if (mutex_lock_interruptible(&instance->vchi_mutex)) {
 		LOG_DBG("Interrupted whilst waiting for lock on (%d)\n",
@@ -671,6 +679,7 @@ static int bcm2835_audio_stop_worker(struct bcm2835_alsa_stream *alsa_stream)
 	int status;
 	int ret;
 
+
 	if (mutex_lock_interruptible(&instance->vchi_mutex)) {
 		LOG_DBG("Interrupted whilst waiting for lock on (%d)\n",
 			instance->num_connections);
@@ -707,6 +716,7 @@ int bcm2835_audio_close(struct bcm2835_alsa_stream *alsa_stream)
 	struct bcm2835_audio_instance *instance = alsa_stream->instance;
 	int status;
 	int ret;
+
 
 	my_workqueue_quit(alsa_stream);
 
@@ -764,6 +774,7 @@ static int bcm2835_audio_write_worker(struct bcm2835_alsa_stream *alsa_stream,
 	struct bcm2835_audio_instance *instance = alsa_stream->instance;
 	int status;
 	int ret;
+
 
 	LOG_INFO(" Writing %d bytes from %p\n", count, src);
 

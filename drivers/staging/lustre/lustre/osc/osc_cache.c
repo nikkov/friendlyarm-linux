@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * GPL HEADER START
  *
@@ -228,7 +227,6 @@ static int osc_extent_sanity_check0(struct osc_extent *ext,
 			rc = 65;
 			goto out;
 		}
-		/* fall through */
 	default:
 		if (atomic_read(&ext->oe_users) > 0) {
 			rc = 70;

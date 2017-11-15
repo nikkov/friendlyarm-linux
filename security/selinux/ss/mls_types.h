@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Type definitions for the multi-level security (MLS) policy.
  *

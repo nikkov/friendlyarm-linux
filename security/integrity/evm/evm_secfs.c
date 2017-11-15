@@ -40,7 +40,7 @@ static ssize_t evm_read_key(struct file *filp, char __user *buf,
 	if (*ppos != 0)
 		return 0;
 
-	sprintf(temp, "%d", (evm_initialized & ~EVM_SETUP));
+	sprintf(temp, "%d", evm_initialized);
 	rc = simple_read_from_buffer(buf, count, ppos, temp, strlen(temp));
 
 	return rc;
@@ -61,29 +61,24 @@ static ssize_t evm_read_key(struct file *filp, char __user *buf,
 static ssize_t evm_write_key(struct file *file, const char __user *buf,
 			     size_t count, loff_t *ppos)
 {
-	int i, ret;
+	char temp[80];
+	int i;
 
-	if (!capable(CAP_SYS_ADMIN) || (evm_initialized & EVM_SETUP))
+	if (!capable(CAP_SYS_ADMIN) || (evm_initialized & EVM_INIT_HMAC))
 		return -EPERM;
 
-	ret = kstrtoint_from_user(buf, count, 0, &i);
-
-	if (ret)
-		return ret;
-
-	/* Reject invalid values */
-	if (!i || (i & ~EVM_INIT_MASK) != 0)
+	if (count >= sizeof(temp) || count == 0)
 		return -EINVAL;
 
-	if (i & EVM_INIT_HMAC) {
-		ret = evm_init_key();
-		if (ret != 0)
-			return ret;
-		/* Forbid further writes after the symmetric key is loaded */
-		i |= EVM_SETUP;
-	}
+	if (copy_from_user(temp, buf, count) != 0)
+		return -EFAULT;
 
-	evm_initialized |= i;
+	temp[count] = '\0';
+
+	if ((sscanf(temp, "%d", &i) != 1) || (i != 1))
+		return -EINVAL;
+
+	evm_init_key();
 
 	return count;
 }

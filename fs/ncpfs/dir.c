@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  dir.c
  *
@@ -120,6 +119,10 @@ static inline int ncp_case_sensitive(const struct inode *i)
 /*
  * Note: leave the hash unchanged if the directory
  * is case-sensitive.
+ *
+ * Accessing the parent inode can be racy under RCU pathwalking.
+ * Use ACCESS_ONCE() to make sure we use _one_ particular inode,
+ * the callers will handle races.
  */
 static int 
 ncp_hash_dentry(const struct dentry *dentry, struct qstr *this)
@@ -144,6 +147,11 @@ ncp_hash_dentry(const struct dentry *dentry, struct qstr *this)
 	return 0;
 }
 
+/*
+ * Accessing the parent inode can be racy under RCU pathwalking.
+ * Use ACCESS_ONCE() to make sure we use _one_ particular inode,
+ * the callers will handle races.
+ */
 static int
 ncp_compare_dentry(const struct dentry *dentry,
 		unsigned int len, const char *str, const struct qstr *name)

@@ -290,7 +290,8 @@ static int au1k_irda_set_speed(struct net_device *dev, int speed)
 	while (irda_read(aup, IR_STATUS) & (IR_RX_STATUS | IR_TX_STATUS)) {
 		msleep(20);
 		if (!timeout--) {
-			netdev_err(dev, "rx/tx disable timeout\n");
+			printk(KERN_ERR "%s: rx/tx disable timeout\n",
+					dev->name);
 			break;
 		}
 	}
@@ -348,7 +349,7 @@ static int au1k_irda_set_speed(struct net_device *dev, int speed)
 				IR_RX_ENABLE);
 		break;
 	default:
-		netdev_err(dev, "unsupported speed %x\n", speed);
+		printk(KERN_ERR "%s unsupported speed %x\n", dev->name, speed);
 		ret = -EINVAL;
 		break;
 	}
@@ -360,18 +361,18 @@ static int au1k_irda_set_speed(struct net_device *dev, int speed)
 	irda_write(aup, IR_RING_PROMPT, 0);
 
 	if (control & (1 << 14)) {
-		netdev_err(dev, "configuration error\n");
+		printk(KERN_ERR "%s: configuration error\n", dev->name);
 	} else {
 		if (control & (1 << 11))
-			netdev_debug(dev, "Valid SIR config\n");
+			printk(KERN_DEBUG "%s Valid SIR config\n", dev->name);
 		if (control & (1 << 12))
-			netdev_debug(dev, "Valid MIR config\n");
+			printk(KERN_DEBUG "%s Valid MIR config\n", dev->name);
 		if (control & (1 << 13))
-			netdev_debug(dev, "Valid FIR config\n");
+			printk(KERN_DEBUG "%s Valid FIR config\n", dev->name);
 		if (control & (1 << 10))
-			netdev_debug(dev, "TX enabled\n");
+			printk(KERN_DEBUG "%s TX enabled\n", dev->name);
 		if (control & (1 << 9))
-			netdev_debug(dev, "RX enabled\n");
+			printk(KERN_DEBUG "%s RX enabled\n", dev->name);
 	}
 
 	return ret;
@@ -583,21 +584,23 @@ static int au1k_irda_start(struct net_device *dev)
 
 	retval = au1k_init(dev);
 	if (retval) {
-		netdev_err(dev, "error in au1k_init\n");
+		printk(KERN_ERR "%s: error in au1k_init\n", dev->name);
 		return retval;
 	}
 
 	retval = request_irq(aup->irq_tx, &au1k_irda_interrupt, 0,
 			     dev->name, dev);
 	if (retval) {
-		netdev_err(dev, "unable to get IRQ %d\n", dev->irq);
+		printk(KERN_ERR "%s: unable to get IRQ %d\n",
+				dev->name, dev->irq);
 		return retval;
 	}
 	retval = request_irq(aup->irq_rx, &au1k_irda_interrupt, 0,
 			     dev->name, dev);
 	if (retval) {
 		free_irq(aup->irq_tx, dev);
-		netdev_err(dev, "unable to get IRQ %d\n", dev->irq);
+		printk(KERN_ERR "%s: unable to get IRQ %d\n",
+				dev->name, dev->irq);
 		return retval;
 	}
 
@@ -670,12 +673,12 @@ static int au1k_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 	flags = ptxd->flags;
 
 	if (flags & AU_OWN) {
-		netdev_debug(dev, "tx_full\n");
+		printk(KERN_DEBUG "%s: tx_full\n", dev->name);
 		netif_stop_queue(dev);
 		aup->tx_full = 1;
 		return 1;
 	} else if (((aup->tx_head + 1) & (NUM_IR_DESC - 1)) == aup->tx_tail) {
-		netdev_debug(dev, "tx_full\n");
+		printk(KERN_DEBUG "%s: tx_full\n", dev->name);
 		netif_stop_queue(dev);
 		aup->tx_full = 1;
 		return 1;
@@ -685,7 +688,7 @@ static int au1k_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 
 #if 0
 	if (irda_read(aup, IR_RX_BYTE_CNT) != 0) {
-		netdev_debug(dev, "tx warning: rx byte cnt %x\n",
+		printk(KERN_DEBUG "tx warning: rx byte cnt %x\n",
 				irda_read(aup, IR_RX_BYTE_CNT));
 	}
 #endif
@@ -723,7 +726,7 @@ static void au1k_tx_timeout(struct net_device *dev)
 	u32 speed;
 	struct au1k_private *aup = netdev_priv(dev);
 
-	netdev_err(dev, "tx timeout\n");
+	printk(KERN_ERR "%s: tx timeout\n", dev->name);
 	speed = aup->speed;
 	aup->speed = 0;
 	au1k_irda_set_speed(dev, speed);
@@ -748,7 +751,8 @@ static int au1k_irda_ioctl(struct net_device *dev, struct ifreq *ifreq, int cmd)
 				ret = au1k_irda_set_speed(dev,
 						rq->ifr_baudrate);
 			else {
-				netdev_err(dev, "ioctl: !netif_running\n");
+				printk(KERN_ERR "%s ioctl: !netif_running\n",
+						dev->name);
 				ret = 0;
 			}
 		}
@@ -864,7 +868,7 @@ out3:
 out2:
 	kfree(aup->rx_buff.head);
 out1:
-	netdev_err(dev, "au1k_irda_net_init() failed.  Returns %d\n");
+	printk(KERN_ERR "au1k_irda_net_init() failed.  Returns %d\n", retval);
 	return retval;
 }
 
@@ -930,7 +934,7 @@ static int au1k_irda_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, dev);
 
-	netdev_info(dev, "IrDA: Registered device\n");
+	printk(KERN_INFO "IrDA: Registered device %s\n", dev->name);
 	return 0;
 
 out4:

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ARCH_TESTS_H
 #define ARCH_TESTS_H
 
@@ -9,6 +8,7 @@ struct test;
 int test__rdpmc(struct test *test __maybe_unused, int subtest);
 int test__perf_time_to_tsc(struct test *test __maybe_unused, int subtest);
 int test__insn_x86(struct test *test __maybe_unused, int subtest);
+int test__intel_cqm_count_nmi_context(struct test *test __maybe_unused, int subtest);
 
 #ifdef HAVE_DWARF_UNWIND_SUPPORT
 struct thread;

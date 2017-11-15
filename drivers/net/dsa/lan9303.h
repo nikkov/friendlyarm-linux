@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/regmap.h>
 #include <linux/device.h>
 #include <net/dsa.h>

@@ -455,11 +455,9 @@ EXPORT_SYMBOL_GPL(fcoe_check_wait_queue);
  *
  * Calls fcoe_check_wait_queue on timeout
  */
-void fcoe_queue_timer(struct timer_list *t)
+void fcoe_queue_timer(ulong lport)
 {
-	struct fcoe_port *port = from_timer(port, t, timer);
-
-	fcoe_check_wait_queue(port->lport, NULL);
+	fcoe_check_wait_queue((struct fc_lport *)lport, NULL);
 }
 EXPORT_SYMBOL_GPL(fcoe_queue_timer);
 

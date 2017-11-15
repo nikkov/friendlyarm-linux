@@ -198,7 +198,8 @@ static int host1x_probe(struct platform_device *pdev)
 
 		order = __ffs(host->domain->pgsize_bitmap);
 		init_iova_domain(&host->iova, 1UL << order,
-				 geometry->aperture_start >> order);
+				 geometry->aperture_start >> order,
+				 geometry->aperture_end >> order);
 		host->iova_end = geometry->aperture_end;
 	}
 

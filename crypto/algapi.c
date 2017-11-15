@@ -897,11 +897,9 @@ int crypto_enqueue_request(struct crypto_queue *queue,
 	int err = -EINPROGRESS;
 
 	if (unlikely(queue->qlen >= queue->max_qlen)) {
-		if (!(request->flags & CRYPTO_TFM_REQ_MAY_BACKLOG)) {
-			err = -ENOSPC;
-			goto out;
-		}
 		err = -EBUSY;
+		if (!(request->flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
+			goto out;
 		if (queue->backlog == &queue->list)
 			queue->backlog = &request->list;
 	}

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /* U3memcpy.S: UltraSparc-III optimized memcpy.
  *
  * Copyright (C) 1999, 2000, 2004 David S. Miller (davem@redhat.com)

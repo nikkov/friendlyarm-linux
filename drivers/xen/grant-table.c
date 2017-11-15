@@ -305,7 +305,7 @@ struct deferred_entry {
 };
 static LIST_HEAD(deferred_list);
 static void gnttab_handle_deferred(unsigned long);
-static DEFINE_TIMER(deferred_timer, gnttab_handle_deferred);
+static DEFINE_TIMER(deferred_timer, gnttab_handle_deferred, 0, 0);
 
 static void gnttab_handle_deferred(unsigned long unused)
 {

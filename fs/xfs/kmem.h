@@ -119,7 +119,8 @@ kmem_zone_free(kmem_zone_t *zone, void *ptr)
 static inline void
 kmem_zone_destroy(kmem_zone_t *zone)
 {
-	kmem_cache_destroy(zone);
+	if (zone)
+		kmem_cache_destroy(zone);
 }
 
 extern void *kmem_zone_alloc(kmem_zone_t *, xfs_km_flags_t);

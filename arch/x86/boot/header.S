@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *	header.S
  *
@@ -17,6 +16,7 @@
  */
 
 #include <asm/segment.h>
+#include <generated/utsrelease.h>
 #include <asm/boot.h>
 #include <asm/page_types.h>
 #include <asm/setup.h>

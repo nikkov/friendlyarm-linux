@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 
 #ifndef _BCACHE_UTIL_H
 #define _BCACHE_UTIL_H
@@ -442,10 +441,10 @@ struct bch_ratelimit {
 	uint64_t		next;
 
 	/*
-	 * Rate at which we want to do work, in units per second
+	 * Rate at which we want to do work, in units per nanosecond
 	 * The units here correspond to the units passed to bch_next_delay()
 	 */
-	uint32_t		rate;
+	unsigned		rate;
 };
 
 static inline void bch_ratelimit_reset(struct bch_ratelimit *d)

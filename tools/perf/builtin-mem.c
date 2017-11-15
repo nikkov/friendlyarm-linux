@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <inttypes.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -113,7 +112,6 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 		if (!perf_mem_events[j].supported) {
 			pr_err("failed: event '%s' not supported\n",
 			       perf_mem_events__name(j));
-			free(rec_argv);
 			return -1;
 		}
 
@@ -237,15 +235,13 @@ static int process_sample_event(struct perf_tool *tool,
 
 static int report_raw_events(struct perf_mem *mem)
 {
-	struct perf_data data = {
-		.file      = {
-			.path = input_name,
-		},
-		.mode      = PERF_DATA_MODE_READ,
-		.force     = mem->force,
+	struct perf_data_file file = {
+		.path = input_name,
+		.mode = PERF_DATA_MODE_READ,
+		.force = mem->force,
 	};
 	int ret;
-	struct perf_session *session = perf_session__new(&data, false,
+	struct perf_session *session = perf_session__new(&file, false,
 							 &mem->tool);
 
 	if (session == NULL)

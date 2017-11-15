@@ -1447,7 +1447,7 @@ static void prism2sta_inf_linkstatus(struct wlandevice *wlandev,
 {
 	struct hfa384x *hw = wlandev->priv;
 
-	hw->link_status_new = le16_to_cpu(inf->info.linkstatus.linkstatus);
+	hw->link_status_new = inf->info.linkstatus.linkstatus;
 
 	schedule_work(&hw->link_bh);
 }
@@ -2004,9 +2004,9 @@ void prism2sta_commsqual_defer(struct work_struct *data)
 	mod_timer(&hw->commsqual_timer, jiffies + HZ);
 }
 
-void prism2sta_commsqual_timer(struct timer_list *t)
+void prism2sta_commsqual_timer(unsigned long data)
 {
-	struct hfa384x *hw = from_timer(hw, t, commsqual_timer);
+	struct hfa384x *hw = (struct hfa384x *)data;
 
 	schedule_work(&hw->commsqual_bh);
 }

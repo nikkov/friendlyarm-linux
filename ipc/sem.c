@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/ipc/sem.c
  * Copyright (C) 1992 Krishna Balasubramanian

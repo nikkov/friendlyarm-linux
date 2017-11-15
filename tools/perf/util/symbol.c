@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -46,7 +45,6 @@ struct symbol_conf symbol_conf = {
 	.show_hist_headers	= true,
 	.symfs			= "",
 	.event_group		= true,
-	.inline_name		= true,
 };
 
 static enum dso_binary_type binary_type_symtab[] = {
@@ -228,7 +226,7 @@ void __map_groups__fixup_end(struct map_groups *mg, enum map_type type)
 	struct maps *maps = &mg->maps[type];
 	struct map *next, *curr;
 
-	down_write(&maps->lock);
+	pthread_rwlock_wrlock(&maps->lock);
 
 	curr = maps__first(maps);
 	if (curr == NULL)
@@ -248,7 +246,7 @@ void __map_groups__fixup_end(struct map_groups *mg, enum map_type type)
 		curr->end = ~0ULL;
 
 out_unlock:
-	up_write(&maps->lock);
+	pthread_rwlock_unlock(&maps->lock);
 }
 
 struct symbol *symbol__new(u64 start, u64 len, u8 binding, const char *name)
@@ -1673,7 +1671,7 @@ struct map *map_groups__find_by_name(struct map_groups *mg,
 	struct maps *maps = &mg->maps[type];
 	struct map *map;
 
-	down_read(&maps->lock);
+	pthread_rwlock_rdlock(&maps->lock);
 
 	for (map = maps__first(maps); map; map = map__next(map)) {
 		if (map->dso && strcmp(map->dso->short_name, name) == 0)
@@ -1683,7 +1681,7 @@ struct map *map_groups__find_by_name(struct map_groups *mg,
 	map = NULL;
 
 out_unlock:
-	up_read(&maps->lock);
+	pthread_rwlock_unlock(&maps->lock);
 	return map;
 }
 

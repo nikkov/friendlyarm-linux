@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "util.h"
 #include "build-id.h"
 #include "hist.h"
@@ -597,7 +596,6 @@ __hists__add_entry(struct hists *hists,
 			.map	= al->map,
 			.sym	= al->sym,
 		},
-		.srcline = al->srcline ? strdup(al->srcline) : NULL,
 		.socket	 = al->socket,
 		.cpu	 = al->cpu,
 		.cpumode = al->cpumode,
@@ -952,7 +950,6 @@ iter_add_next_cumulative_entry(struct hist_entry_iter *iter,
 			.map = al->map,
 			.sym = al->sym,
 		},
-		.srcline = al->srcline ? strdup(al->srcline) : NULL,
 		.parent = iter->parent,
 		.raw_data = sample->raw_data,
 		.raw_size = sample->raw_size,
@@ -1142,6 +1139,11 @@ void hist_entry__delete(struct hist_entry *he)
 		map__zput(he->mem_info->iaddr.map);
 		map__zput(he->mem_info->daddr.map);
 		zfree(&he->mem_info);
+	}
+
+	if (he->inline_node) {
+		inline_node__delete(he->inline_node);
+		he->inline_node = NULL;
 	}
 
 	zfree(&he->stat_acc);

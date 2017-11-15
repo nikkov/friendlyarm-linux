@@ -133,8 +133,7 @@ enum {
 #endif /* CONFIG_X86_X32 */
 };
 
-static long __snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd,
-					  unsigned long arg)
+static long snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = compat_ptr(arg);
 
@@ -154,7 +153,7 @@ static long __snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd,
 	case SNDRV_TIMER_IOCTL_PAUSE:
 	case SNDRV_TIMER_IOCTL_PAUSE_OLD:
 	case SNDRV_TIMER_IOCTL_NEXT_DEVICE:
-		return __snd_timer_user_ioctl(file, cmd, (unsigned long)argp);
+		return snd_timer_user_ioctl(file, cmd, (unsigned long)argp);
 	case SNDRV_TIMER_IOCTL_GPARAMS32:
 		return snd_timer_user_gparams_compat(file, argp);
 	case SNDRV_TIMER_IOCTL_INFO32:
@@ -167,16 +166,4 @@ static long __snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd,
 #endif /* CONFIG_X86_X32 */
 	}
 	return -ENOIOCTLCMD;
-}
-
-static long snd_timer_user_ioctl_compat(struct file *file, unsigned int cmd,
-					unsigned long arg)
-{
-	struct snd_timer_user *tu = file->private_data;
-	long ret;
-
-	mutex_lock(&tu->ioctl_lock);
-	ret = __snd_timer_user_ioctl_compat(file, cmd, arg);
-	mutex_unlock(&tu->ioctl_lock);
-	return ret;
 }

@@ -78,7 +78,7 @@ static unsigned long lock_rtas(void)
 
 	local_irq_save(flags);
 	preempt_disable();
-	arch_spin_lock(&rtas.lock);
+	arch_spin_lock_flags(&rtas.lock, flags);
 	return flags;
 }
 

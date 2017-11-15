@@ -47,7 +47,6 @@
 #include <linux/mmc/sdio.h>
 #include <linux/scatterlist.h>
 #include <linux/spinlock.h>
-#include <linux/swiotlb.h>
 #include <linux/workqueue.h>
 
 #include "tmio_mmc.h"
@@ -167,11 +166,11 @@ static void tmio_mmc_clk_start(struct tmio_mmc_host *host)
 
 	/* HW engineers overrode docs: no sleep needed on R-Car2+ */
 	if (!(host->pdata->flags & TMIO_MMC_MIN_RCAR2))
-		usleep_range(10000, 11000);
+		msleep(10);
 
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG) {
 		sd_ctrl_write16(host, CTL_CLK_AND_WAIT_CTL, 0x0100);
-		usleep_range(10000, 11000);
+		msleep(10);
 	}
 }
 
@@ -179,7 +178,7 @@ static void tmio_mmc_clk_stop(struct tmio_mmc_host *host)
 {
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG) {
 		sd_ctrl_write16(host, CTL_CLK_AND_WAIT_CTL, 0x0000);
-		usleep_range(10000, 11000);
+		msleep(10);
 	}
 
 	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, ~CLK_CTL_SCLKEN &
@@ -187,7 +186,7 @@ static void tmio_mmc_clk_stop(struct tmio_mmc_host *host)
 
 	/* HW engineers overrode docs: no sleep needed on R-Car2+ */
 	if (!(host->pdata->flags & TMIO_MMC_MIN_RCAR2))
-		usleep_range(10000, 11000);
+		msleep(10);
 }
 
 static void tmio_mmc_set_clock(struct tmio_mmc_host *host,
@@ -219,7 +218,7 @@ static void tmio_mmc_set_clock(struct tmio_mmc_host *host,
 			sd_ctrl_read16(host, CTL_SD_CARD_CLK_CTL));
 	sd_ctrl_write16(host, CTL_SD_CARD_CLK_CTL, clk & CLK_CTL_DIV_MASK);
 	if (!(host->pdata->flags & TMIO_MMC_MIN_RCAR2))
-		usleep_range(10000, 11000);
+		msleep(10);
 
 	tmio_mmc_clk_start(host);
 }
@@ -230,11 +229,11 @@ static void tmio_mmc_reset(struct tmio_mmc_host *host)
 	sd_ctrl_write16(host, CTL_RESET_SD, 0x0000);
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG)
 		sd_ctrl_write16(host, CTL_RESET_SDIO, 0x0000);
-	usleep_range(10000, 11000);
+	msleep(10);
 	sd_ctrl_write16(host, CTL_RESET_SD, 0x0001);
 	if (host->pdata->flags & TMIO_MMC_HAVE_HIGH_REG)
 		sd_ctrl_write16(host, CTL_RESET_SDIO, 0x0001);
-	usleep_range(10000, 11000);
+	msleep(10);
 
 	if (host->pdata->flags & TMIO_MMC_SDIO_IRQ) {
 		sd_ctrl_write16(host, CTL_SDIO_IRQ_MASK, host->sdio_irq_mask);
@@ -1113,11 +1112,8 @@ static int tmio_mmc_init_ocr(struct tmio_mmc_host *host)
 {
 	struct tmio_mmc_data *pdata = host->pdata;
 	struct mmc_host *mmc = host->mmc;
-	int err;
 
-	err = mmc_regulator_get_supply(mmc);
-	if (err)
-		return err;
+	mmc_regulator_get_supply(mmc);
 
 	/* use ocr_mask if no regulator */
 	if (!mmc->ocr_avail)
@@ -1219,18 +1215,6 @@ int tmio_mmc_host_probe(struct tmio_mmc_host *_host,
 	mmc->max_blk_count = pdata->max_blk_count ? :
 		(PAGE_SIZE / mmc->max_blk_size) * mmc->max_segs;
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
-	/*
-	 * Since swiotlb has memory size limitation, this will calculate
-	 * the maximum size locally (because we don't have any APIs for it now)
-	 * and check the current max_req_size. And then, this will update
-	 * the max_req_size if needed as a workaround.
-	 */
-	if (swiotlb_max_segment()) {
-		unsigned int max_size = (1 << IO_TLB_SHIFT) * IO_TLB_SEGSIZE;
-
-		if (mmc->max_req_size > max_size)
-			mmc->max_req_size = max_size;
-	}
 	mmc->max_seg_size = mmc->max_req_size;
 
 	_host->native_hotplug = !(pdata->flags & TMIO_MMC_USE_GPIO_CD ||
@@ -1302,24 +1286,23 @@ int tmio_mmc_host_probe(struct tmio_mmc_host *_host,
 	pm_runtime_enable(&pdev->dev);
 
 	ret = mmc_add_host(mmc);
-	if (ret)
-		goto remove_host;
+	if (ret < 0) {
+		tmio_mmc_host_remove(_host);
+		return ret;
+	}
 
 	dev_pm_qos_expose_latency_limit(&pdev->dev, 100);
 
 	if (pdata->flags & TMIO_MMC_USE_GPIO_CD) {
 		ret = mmc_gpio_request_cd(mmc, pdata->cd_gpio, 0);
-		if (ret)
-			goto remove_host;
-
+		if (ret < 0) {
+			tmio_mmc_host_remove(_host);
+			return ret;
+		}
 		mmc_gpiod_request_cd_irq(mmc);
 	}
 
 	return 0;
-
-remove_host:
-	tmio_mmc_host_remove(_host);
-	return ret;
 }
 EXPORT_SYMBOL_GPL(tmio_mmc_host_probe);
 

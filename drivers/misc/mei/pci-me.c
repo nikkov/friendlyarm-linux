@@ -225,7 +225,7 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * MEI requires to resume from runtime suspend mode
 	 * in order to perform link reset flow upon system suspend.
 	 */
-	dev_pm_set_driver_flags(&pdev->dev, DPM_FLAG_NEVER_SKIP);
+	pdev->dev_flags |= PCI_DEV_FLAGS_NEEDS_RESUME;
 
 	/*
 	 * ME maps runtime suspend/resume to D0i states,

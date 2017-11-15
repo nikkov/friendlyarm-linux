@@ -963,9 +963,10 @@ static bool filter(struct dma_chan *chan, void *param)
 	return true;
 }
 
-static void mxcmci_watchdog(struct timer_list *t)
+static void mxcmci_watchdog(unsigned long data)
 {
-	struct mxcmci_host *host = from_timer(host, t, watchdog);
+	struct mmc_host *mmc = (struct mmc_host *)data;
+	struct mxcmci_host *host = mmc_priv(mmc);
 	struct mmc_request *req = host->req;
 	unsigned int stat = mxcmci_readl(host, MMC_REG_STATUS);
 
@@ -1074,7 +1075,7 @@ static int mxcmci_probe(struct platform_device *pdev)
 		dat3_card_detect = true;
 
 	ret = mmc_regulator_get_supply(mmc);
-	if (ret)
+	if (ret == -EPROBE_DEFER)
 		goto out_free;
 
 	if (!mmc->ocr_avail) {
@@ -1164,7 +1165,9 @@ static int mxcmci_probe(struct platform_device *pdev)
 			goto out_free_dma;
 	}
 
-	timer_setup(&host->watchdog, mxcmci_watchdog, 0);
+	init_timer(&host->watchdog);
+	host->watchdog.function = &mxcmci_watchdog;
+	host->watchdog.data = (unsigned long)mmc;
 
 	mmc_add_host(mmc);
 

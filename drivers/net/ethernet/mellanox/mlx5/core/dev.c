@@ -77,41 +77,35 @@ static void add_delayed_event(struct mlx5_priv *priv,
 	list_add_tail(&delayed_event->list, &priv->waiting_events_list);
 }
 
-static void delayed_event_release(struct mlx5_device_context *dev_ctx,
-				  struct mlx5_priv *priv)
+static void fire_delayed_event_locked(struct mlx5_device_context *dev_ctx,
+				      struct mlx5_core_dev *dev,
+				      struct mlx5_priv *priv)
 {
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
 	struct mlx5_delayed_event *de;
 	struct mlx5_delayed_event *n;
-	struct list_head temp;
 
-	INIT_LIST_HEAD(&temp);
-
-	spin_lock_irq(&priv->ctx_lock);
-
+	/* stop delaying events */
 	priv->is_accum_events = false;
-	list_splice_init(&priv->waiting_events_list, &temp);
-	if (!dev_ctx->context)
-		goto out;
-	list_for_each_entry_safe(de, n, &temp, list)
+
+	/* fire all accumulated events before new event comes */
+	list_for_each_entry_safe(de, n, &priv->waiting_events_list, list) {
 		dev_ctx->intf->event(dev, dev_ctx->context, de->event, de->param);
-
-out:
-	spin_unlock_irq(&priv->ctx_lock);
-
-	list_for_each_entry_safe(de, n, &temp, list) {
 		list_del(&de->list);
 		kfree(de);
 	}
 }
 
-/* accumulating events that can come after mlx5_ib calls to
- * ib_register_device, till adding that interface to the events list.
- */
-static void delayed_event_start(struct mlx5_priv *priv)
+static void cleanup_delayed_evets(struct mlx5_priv *priv)
 {
+	struct mlx5_delayed_event *de;
+	struct mlx5_delayed_event *n;
+
 	spin_lock_irq(&priv->ctx_lock);
-	priv->is_accum_events = true;
+	priv->is_accum_events = false;
+	list_for_each_entry_safe(de, n, &priv->waiting_events_list, list) {
+		list_del(&de->list);
+		kfree(de);
+	}
 	spin_unlock_irq(&priv->ctx_lock);
 }
 
@@ -128,8 +122,11 @@ void mlx5_add_device(struct mlx5_interface *intf, struct mlx5_priv *priv)
 		return;
 
 	dev_ctx->intf = intf;
+	/* accumulating events that can come after mlx5_ib calls to
+	 * ib_register_device, till adding that interface to the events list.
+	 */
 
-	delayed_event_start(priv);
+	priv->is_accum_events = true;
 
 	dev_ctx->context = intf->add(dev);
 	set_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state);
@@ -139,6 +136,8 @@ void mlx5_add_device(struct mlx5_interface *intf, struct mlx5_priv *priv)
 	if (dev_ctx->context) {
 		spin_lock_irq(&priv->ctx_lock);
 		list_add_tail(&dev_ctx->list, &priv->ctx_list);
+
+		fire_delayed_event_locked(dev_ctx, dev, priv);
 
 #ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
 		if (dev_ctx->intf->pfault) {
@@ -151,12 +150,11 @@ void mlx5_add_device(struct mlx5_interface *intf, struct mlx5_priv *priv)
 		}
 #endif
 		spin_unlock_irq(&priv->ctx_lock);
-	}
-
-	delayed_event_release(dev_ctx, priv);
-
-	if (!dev_ctx->context)
+	} else {
 		kfree(dev_ctx);
+		 /* delete all accumulated events */
+		cleanup_delayed_evets(priv);
+	}
 }
 
 static struct mlx5_device_context *mlx5_get_device(struct mlx5_interface *intf,
@@ -207,21 +205,17 @@ static void mlx5_attach_interface(struct mlx5_interface *intf, struct mlx5_priv 
 	if (!dev_ctx)
 		return;
 
-	delayed_event_start(priv);
 	if (intf->attach) {
 		if (test_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state))
-			goto out;
+			return;
 		intf->attach(dev, dev_ctx->context);
 		set_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state);
 	} else {
 		if (test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state))
-			goto out;
+			return;
 		dev_ctx->context = intf->add(dev);
 		set_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state);
 	}
-
-out:
-	delayed_event_release(dev_ctx, priv);
 }
 
 void mlx5_attach_device(struct mlx5_core_dev *dev)
@@ -420,14 +414,8 @@ void mlx5_core_event(struct mlx5_core_dev *dev, enum mlx5_dev_event event,
 	if (priv->is_accum_events)
 		add_delayed_event(priv, dev, event, param);
 
-	/* After mlx5_detach_device, the dev_ctx->intf is still set and dev_ctx is
-	 * still in priv->ctx_list. In this case, only notify the dev_ctx if its
-	 * ADDED or ATTACHED bit are set.
-	 */
 	list_for_each_entry(dev_ctx, &priv->ctx_list, list)
-		if (dev_ctx->intf->event &&
-		    (test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state) ||
-		     test_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state)))
+		if (dev_ctx->intf->event)
 			dev_ctx->intf->event(dev, dev_ctx->context, event, param);
 
 	spin_unlock_irqrestore(&priv->ctx_lock, flags);

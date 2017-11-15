@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * f_midi.c -- USB MIDI class function driver
  *
@@ -16,6 +15,8 @@
  * and drivers/usb/gadget/midi.c,
  *   Copyright (C) 2006 Thumtronics Pty Ltd.
  *   Ben Williamson <ben.williamson@greyinnovation.com>
+ *
+ * Licensed under the GPL-2 or later.
  */
 
 #include <linux/kernel.h>
@@ -1188,7 +1189,7 @@ static struct configfs_attribute *midi_attrs[] = {
 	NULL,
 };
 
-static const struct config_item_type midi_func_type = {
+static struct config_item_type midi_func_type = {
 	.ct_item_ops	= &midi_item_ops,
 	.ct_attrs	= midi_attrs,
 	.ct_owner	= THIS_MODULE,

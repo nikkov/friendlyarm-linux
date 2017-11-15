@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Asm versions of Xen pv-ops, suitable for direct use.
  *

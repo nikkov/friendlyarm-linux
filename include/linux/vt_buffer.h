@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *	include/linux/vt_buffer.h -- Access to VT screen buffer
  *

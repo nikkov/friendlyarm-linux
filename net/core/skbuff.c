@@ -4864,7 +4864,6 @@ void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 	if (!xnet)
 		return;
 
-	ipvs_reset(skb);
 	skb_orphan(skb);
 	skb->mark = 0;
 }

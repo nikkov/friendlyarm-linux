@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *    Copyright IBM Corp. 1999, 2012
  *    Author(s): Hartmut Penner <hp@de.ibm.com>,
@@ -134,9 +133,8 @@ struct lowcore {
 	__u8	pad_0x03b4[0x03b8-0x03b4];	/* 0x03b4 */
 	__u64	gmap;				/* 0x03b8 */
 	__u32	spinlock_lockval;		/* 0x03c0 */
-	__u32	spinlock_index;			/* 0x03c4 */
-	__u32	fpu_flags;			/* 0x03c8 */
-	__u8	pad_0x03cc[0x0400-0x03cc];	/* 0x03cc */
+	__u32	fpu_flags;			/* 0x03c4 */
+	__u8	pad_0x03c8[0x0400-0x03c8];	/* 0x03c8 */
 
 	/* Per cpu primary space access list */
 	__u32	paste[16];			/* 0x0400 */

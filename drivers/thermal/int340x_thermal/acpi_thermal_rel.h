@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ACPI_ACPI_THERMAL_H
 #define __ACPI_ACPI_THERMAL_H
 

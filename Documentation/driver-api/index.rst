@@ -46,7 +46,6 @@ available subsections can be seen below.
    pinctl
    gpio
    misc_devices
-   dmaengine/index
 
 .. only::  subproject and html
 

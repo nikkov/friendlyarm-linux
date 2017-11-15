@@ -1122,8 +1122,7 @@ int proc_get_rx_ampdu(struct seq_file *m, void *v)
 
 	if (pregpriv)
 		DBG_871X_SEL_NL(m,
-			"accept_addba_req = %d , 0:Reject AP's Add BA req, 1:Accept AP's Add BA req.\n",
-			pmlmeinfo->accept_addba_req
+			"bAcceptAddbaReq = %d , 0:Reject AP's Add BA req, 1:Accept AP's Add BA req.\n", pmlmeinfo->bAcceptAddbaReq
 			);
 
 	return 0;
@@ -1147,9 +1146,8 @@ ssize_t proc_set_rx_ampdu(struct file *file, const char __user *buffer, size_t c
 		sscanf(tmp, "%d ", &mode);
 
 		if (pregpriv && mode < 2) {
-			pmlmeinfo->accept_addba_req = mode;
-			DBG_871X("pmlmeinfo->accept_addba_req =%d\n",
-				 pmlmeinfo->accept_addba_req);
+			pmlmeinfo->bAcceptAddbaReq = mode;
+			DBG_871X("pmlmeinfo->bAcceptAddbaReq =%d\n", pmlmeinfo->bAcceptAddbaReq);
 			if (mode == 0) {
 				/*tear down Rx AMPDU*/
 				send_delba(padapter, 0, get_my_bssid(&(pmlmeinfo->network)));/* recipient*/

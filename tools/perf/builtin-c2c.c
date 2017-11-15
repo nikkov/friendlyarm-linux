@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * This is rewrite of original c2c tool introduced in here:
  *   http://lwn.net/Articles/588866/
@@ -2524,7 +2523,7 @@ static int perf_c2c__report(int argc, const char **argv)
 {
 	struct perf_session *session;
 	struct ui_progress prog;
-	struct perf_data data = {
+	struct perf_data_file file = {
 		.mode = PERF_DATA_MODE_READ,
 	};
 	char callchain_default_opt[] = CALLCHAIN_DEFAULT_OPT;
@@ -2573,8 +2572,8 @@ static int perf_c2c__report(int argc, const char **argv)
 	if (!input_name || !strlen(input_name))
 		input_name = "perf.data";
 
-	data.file.path = input_name;
-	data.force     = symbol_conf.force;
+	file.path  = input_name;
+	file.force = symbol_conf.force;
 
 	err = setup_display(display);
 	if (err)
@@ -2592,7 +2591,7 @@ static int perf_c2c__report(int argc, const char **argv)
 		goto out;
 	}
 
-	session = perf_session__new(&data, 0, &c2c.tool);
+	session = perf_session__new(&file, 0, &c2c.tool);
 	if (session == NULL) {
 		pr_debug("No memory for session\n");
 		goto out;
@@ -2612,7 +2611,7 @@ static int perf_c2c__report(int argc, const char **argv)
 		goto out_session;
 
 	/* No pipe support at the moment. */
-	if (perf_data__is_pipe(session->data)) {
+	if (perf_data_file__is_pipe(session->file)) {
 		pr_debug("No pipe support at the moment.\n");
 		goto out_session;
 	}
@@ -2733,7 +2732,6 @@ static int perf_c2c__record(int argc, const char **argv)
 		if (!perf_mem_events[j].supported) {
 			pr_err("failed: event '%s' not supported\n",
 			       perf_mem_events[j].name);
-			free(rec_argv);
 			return -1;
 		}
 

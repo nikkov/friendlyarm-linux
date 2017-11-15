@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* -*- linux-c -*-
  * Cypress USB Thermometer driver 
  * 
@@ -7,6 +6,11 @@
  * This driver works with Elektor magazine USB Interface as published in 
  * issue #291. It should also work with the original starter kit/demo board
  * from Cypress.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, version 2.
+ *
  */
 
 

@@ -143,6 +143,6 @@ struct kirkwood_dma_data {
 	int burst;
 };
 
-extern const struct snd_soc_platform_driver kirkwood_soc_platform;
+extern struct snd_soc_platform_driver kirkwood_soc_platform;
 
 #endif

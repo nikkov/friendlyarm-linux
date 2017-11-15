@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * apei-internal.h - ACPI Platform Error Interface internal
  * definitions.

@@ -5820,7 +5820,7 @@ static void atlas7_gpio_handle_irq(struct irq_desc *desc)
 				__func__, gc->label,
 				bank->gpio_offset + pin_in_bank);
 			generic_handle_irq(
-				irq_find_mapping(gc->irq.domain,
+				irq_find_mapping(gc->irqdomain,
 					bank->gpio_offset + pin_in_bank));
 		}
 

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_PARAVIRT_H
 #define _ASM_X86_PARAVIRT_H
 /* Various instructions on x86 need to be replaced for
@@ -16,9 +15,10 @@
 #include <linux/cpumask.h>
 #include <asm/frame.h>
 
-static inline void load_sp0(unsigned long sp0)
+static inline void load_sp0(struct tss_struct *tss,
+			     struct thread_struct *thread)
 {
-	PVOP_VCALL1(pv_cpu_ops.load_sp0, sp0);
+	PVOP_VCALL2(pv_cpu_ops.load_sp0, tss, thread);
 }
 
 /* The paravirtualized CPUID instruction. */

@@ -164,8 +164,7 @@ static struct fileIdentDesc *udf_find_entry(struct inode *dir,
 {
 	struct fileIdentDesc *fi = NULL;
 	loff_t f_pos;
-	udf_pblk_t block;
-	int flen;
+	int block, flen;
 	unsigned char *fname = NULL, *copy_name = NULL;
 	unsigned char *nameptr;
 	uint8_t lfi;
@@ -353,7 +352,7 @@ static struct fileIdentDesc *udf_add_entry(struct inode *dir,
 	int nfidlen;
 	uint8_t lfi;
 	uint16_t liu;
-	udf_pblk_t block;
+	int block;
 	struct kernel_lb_addr eloc;
 	uint32_t elen = 0;
 	sector_t offset;
@@ -750,7 +749,7 @@ static int empty_dir(struct inode *dir)
 	struct udf_fileident_bh fibh;
 	loff_t f_pos;
 	loff_t size = udf_ext0_offset(dir) + dir->i_size;
-	udf_pblk_t block;
+	int block;
 	struct kernel_lb_addr eloc;
 	uint32_t elen;
 	sector_t offset;
@@ -840,7 +839,7 @@ static int udf_rmdir(struct inode *dir, struct dentry *dentry)
 	if (retval)
 		goto end_rmdir;
 	if (inode->i_nlink != 2)
-		udf_warn(inode->i_sb, "empty directory has nlink != 2 (%u)\n",
+		udf_warn(inode->i_sb, "empty directory has nlink != 2 (%d)\n",
 			 inode->i_nlink);
 	clear_nlink(inode);
 	inode->i_size = 0;
@@ -882,7 +881,7 @@ static int udf_unlink(struct inode *dir, struct dentry *dentry)
 		goto end_unlink;
 
 	if (!inode->i_nlink) {
-		udf_debug("Deleting nonexistent file (%lu), %u\n",
+		udf_debug("Deleting nonexistent file (%lu), %d\n",
 			  inode->i_ino, inode->i_nlink);
 		set_nlink(inode, 1);
 	}
@@ -914,7 +913,7 @@ static int udf_symlink(struct inode *dir, struct dentry *dentry,
 	int eoffset, elen = 0;
 	uint8_t *ea;
 	int err;
-	udf_pblk_t block;
+	int block;
 	unsigned char *name = NULL;
 	int namelen;
 	struct udf_inode_info *iinfo;

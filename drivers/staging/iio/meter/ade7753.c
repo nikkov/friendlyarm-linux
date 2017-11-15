@@ -80,7 +80,7 @@
  * @us:         actual spi_device
  * @tx:         transmit buffer
  * @rx:         receive buffer
- * @buf_lock:       mutex to protect tx, rx and write frequency
+ * @buf_lock:       mutex to protect tx and rx
  **/
 struct ade7753_state {
 	struct spi_device   *us;
@@ -107,19 +107,6 @@ static int ade7753_spi_write_reg_8(struct device *dev,
 	return ret;
 }
 
-static int __ade7753_spi_write_reg_16(struct device *dev, u8 reg_address,
-				      u16 value)
-{
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
-	struct ade7753_state *st = iio_priv(indio_dev);
-
-	st->tx[0] = ADE7753_WRITE_REG(reg_address);
-	st->tx[1] = (value >> 8) & 0xFF;
-	st->tx[2] = value & 0xFF;
-
-	return spi_write(st->us, st->tx, 3);
-}
-
 static int ade7753_spi_write_reg_16(struct device *dev, u8 reg_address,
 				    u16 value)
 {
@@ -128,7 +115,10 @@ static int ade7753_spi_write_reg_16(struct device *dev, u8 reg_address,
 	struct ade7753_state *st = iio_priv(indio_dev);
 
 	mutex_lock(&st->buf_lock);
-	ret = __ade7753_spi_write_reg_16(dev, reg_address, value);
+	st->tx[0] = ADE7753_WRITE_REG(reg_address);
+	st->tx[1] = (value >> 8) & 0xFF;
+	st->tx[2] = value & 0xFF;
+	ret = spi_write(st->us, st->tx, 3);
 	mutex_unlock(&st->buf_lock);
 
 	return ret;
@@ -493,7 +483,7 @@ static ssize_t ade7753_write_frequency(struct device *dev,
 	if (!val)
 		return -EINVAL;
 
-	mutex_lock(&st->buf_lock);
+	mutex_lock(&indio_dev->mlock);
 
 	t = 27900 / val;
 	if (t > 0)
@@ -511,10 +501,10 @@ static ssize_t ade7753_write_frequency(struct device *dev,
 	reg &= ~(3 << 11);
 	reg |= t << 11;
 
-	ret = __ade7753_spi_write_reg_16(dev, ADE7753_MODE, reg);
+	ret = ade7753_spi_write_reg_16(dev, ADE7753_MODE, reg);
 
 out:
-	mutex_unlock(&st->buf_lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret ? ret : len;
 }
@@ -571,6 +561,7 @@ static const struct attribute_group ade7753_attribute_group = {
 
 static const struct iio_info ade7753_info = {
 	.attrs = &ade7753_attribute_group,
+	.driver_module = THIS_MODULE,
 };
 
 static int ade7753_probe(struct spi_device *spi)

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_UNWIND_H
 #define _ASM_X86_UNWIND_H
 
@@ -13,11 +12,11 @@ struct unwind_state {
 	struct task_struct *task;
 	int graph_idx;
 	bool error;
-#if defined(CONFIG_UNWINDER_ORC)
+#if defined(CONFIG_ORC_UNWINDER)
 	bool signal, full_regs;
 	unsigned long sp, bp, ip;
 	struct pt_regs *regs;
-#elif defined(CONFIG_UNWINDER_FRAME_POINTER)
+#elif defined(CONFIG_FRAME_POINTER_UNWINDER)
 	bool got_irq;
 	unsigned long *bp, *orig_sp, ip;
 	struct pt_regs *regs;
@@ -51,7 +50,7 @@ void unwind_start(struct unwind_state *state, struct task_struct *task,
 	__unwind_start(state, task, regs, first_frame);
 }
 
-#if defined(CONFIG_UNWINDER_ORC) || defined(CONFIG_UNWINDER_FRAME_POINTER)
+#if defined(CONFIG_ORC_UNWINDER) || defined(CONFIG_FRAME_POINTER_UNWINDER)
 static inline struct pt_regs *unwind_get_entry_regs(struct unwind_state *state)
 {
 	if (unwind_done(state))
@@ -66,7 +65,7 @@ static inline struct pt_regs *unwind_get_entry_regs(struct unwind_state *state)
 }
 #endif
 
-#ifdef CONFIG_UNWINDER_ORC
+#ifdef CONFIG_ORC_UNWINDER
 void unwind_init(void);
 void unwind_module_init(struct module *mod, void *orc_ip, size_t orc_ip_size,
 			void *orc, size_t orc_size);

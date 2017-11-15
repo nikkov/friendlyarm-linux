@@ -109,7 +109,7 @@ int __init irlmp_init(void)
 	irlmp->last_lsap_sel = 0x0f; /* Reserved 0x00-0x0f */
 	strcpy(sysctl_devname, "Linux");
 
-	timer_setup(&irlmp->discovery_timer, NULL, 0);
+	init_timer(&irlmp->discovery_timer);
 
 	/* Do discovery every 3 seconds, conditionally */
 	if (sysctl_discovery)
@@ -185,7 +185,7 @@ struct lsap_cb *irlmp_open_lsap(__u8 slsap_sel, notify_t *notify, __u8 pid)
 		self->dlsap_sel = LSAP_ANY;
 	/* self->connected = FALSE; -> already NULL via memset() */
 
-	timer_setup(&self->watchdog_timer, NULL, 0);
+	init_timer(&self->watchdog_timer);
 
 	self->notify = *notify;
 
@@ -311,7 +311,7 @@ void irlmp_register_link(struct irlap_cb *irlap, __u32 saddr, notify_t *notify)
 
 	lap->lap_state = LAP_STANDBY;
 
-	timer_setup(&lap->idle_timer, NULL, 0);
+	init_timer(&lap->idle_timer);
 
 	/*
 	 *  Insert into queue of LMP links
@@ -655,7 +655,7 @@ struct lsap_cb *irlmp_dup(struct lsap_cb *orig, void *instance)
 	/* Not everything is the same */
 	new->notify.instance = instance;
 
-	timer_setup(&new->watchdog_timer, NULL, 0);
+	init_timer(&new->watchdog_timer);
 
 	hashbin_insert(irlmp->unconnected_lsaps, (irda_queue_t *) new,
 		       (long) new, NULL);

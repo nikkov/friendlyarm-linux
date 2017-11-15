@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -320,7 +319,7 @@ struct dso *machine__findnew_vdso(struct machine *machine,
 	struct vdso_info *vdso_info;
 	struct dso *dso = NULL;
 
-	down_write(&machine->dsos.lock);
+	pthread_rwlock_wrlock(&machine->dsos.lock);
 	if (!machine->vdso_info)
 		machine->vdso_info = vdso_info__new();
 
@@ -348,7 +347,7 @@ struct dso *machine__findnew_vdso(struct machine *machine,
 
 out_unlock:
 	dso__get(dso);
-	up_write(&machine->dsos.lock);
+	pthread_rwlock_unlock(&machine->dsos.lock);
 	return dso;
 }
 

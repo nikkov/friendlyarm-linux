@@ -992,7 +992,7 @@ static void init_gcm_job(struct aead_request *req,
 	struct caam_ctx *ctx = crypto_aead_ctx(aead);
 	unsigned int ivsize = crypto_aead_ivsize(aead);
 	u32 *desc = edesc->hw_desc;
-	bool generic_gcm = (ivsize == GCM_AES_IV_SIZE);
+	bool generic_gcm = (ivsize == 12);
 	unsigned int last;
 
 	init_aead_job(req, edesc, all_contig, encrypt);
@@ -1004,7 +1004,7 @@ static void init_gcm_job(struct aead_request *req,
 
 	/* Read GCM IV */
 	append_cmd(desc, CMD_FIFO_LOAD | FIFOLD_CLASS_CLASS1 | IMMEDIATE |
-			 FIFOLD_TYPE_IV | FIFOLD_TYPE_FLUSH1 | GCM_AES_IV_SIZE | last);
+			 FIFOLD_TYPE_IV | FIFOLD_TYPE_FLUSH1 | 12 | last);
 	/* Append Salt */
 	if (!generic_gcm)
 		append_data(desc, ctx->key + ctx->cdata.keylen, 4);
@@ -1953,7 +1953,7 @@ static struct caam_aead_alg driver_aeads[] = {
 			.setauthsize = rfc4106_setauthsize,
 			.encrypt = ipsec_gcm_encrypt,
 			.decrypt = ipsec_gcm_decrypt,
-			.ivsize = GCM_RFC4106_IV_SIZE,
+			.ivsize = 8,
 			.maxauthsize = AES_BLOCK_SIZE,
 		},
 		.caam = {
@@ -1971,7 +1971,7 @@ static struct caam_aead_alg driver_aeads[] = {
 			.setauthsize = rfc4543_setauthsize,
 			.encrypt = ipsec_gcm_encrypt,
 			.decrypt = ipsec_gcm_decrypt,
-			.ivsize = GCM_RFC4543_IV_SIZE,
+			.ivsize = 8,
 			.maxauthsize = AES_BLOCK_SIZE,
 		},
 		.caam = {
@@ -1990,7 +1990,7 @@ static struct caam_aead_alg driver_aeads[] = {
 			.setauthsize = gcm_setauthsize,
 			.encrypt = gcm_encrypt,
 			.decrypt = gcm_decrypt,
-			.ivsize = GCM_AES_IV_SIZE,
+			.ivsize = 12,
 			.maxauthsize = AES_BLOCK_SIZE,
 		},
 		.caam = {

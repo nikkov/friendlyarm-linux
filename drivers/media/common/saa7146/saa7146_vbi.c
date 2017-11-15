@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <media/drv-intf/saa7146_vv.h>
 
 static int vbi_pixel_to_capture = 720 * 2;

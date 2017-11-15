@@ -508,9 +508,9 @@ static irqreturn_t mvsd_irq(int irq, void *dev)
 	return IRQ_NONE;
 }
 
-static void mvsd_timeout_timer(struct timer_list *t)
+static void mvsd_timeout_timer(unsigned long data)
 {
-	struct mvsd_host *host = from_timer(host, t, timer);
+	struct mvsd_host *host = (struct mvsd_host *)data;
 	void __iomem *iobase = host->base;
 	struct mmc_request *mrq;
 	unsigned long flags;
@@ -776,7 +776,7 @@ static int mvsd_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	timer_setup(&host->timer, mvsd_timeout_timer, 0);
+	setup_timer(&host->timer, mvsd_timeout_timer, (unsigned long)host);
 	platform_set_drvdata(pdev, mmc);
 	ret = mmc_add_host(mmc);
 	if (ret)

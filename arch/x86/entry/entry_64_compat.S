@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Compatibility mode system call entry point for x86-64.
  *
@@ -337,7 +336,8 @@ ENTRY(entry_INT80_compat)
 
 	/* Go back to user mode. */
 	TRACE_IRQS_ON
-	jmp	swapgs_restore_regs_and_return_to_usermode
+	SWAPGS
+	jmp	restore_regs_and_iret
 END(entry_INT80_compat)
 
 ENTRY(stub32_clone)

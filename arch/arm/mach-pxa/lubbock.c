@@ -381,11 +381,14 @@ static struct pxafb_mach_info sharp_lm8v31 = {
 
 #define	MMC_POLL_RATE		msecs_to_jiffies(1000)
 
+static void lubbock_mmc_poll(unsigned long);
 static irq_handler_t mmc_detect_int;
-static void *mmc_detect_int_data;
-static struct timer_list mmc_timer;
 
-static void lubbock_mmc_poll(struct timer_list *unused)
+static struct timer_list mmc_timer = {
+	.function	= lubbock_mmc_poll,
+};
+
+static void lubbock_mmc_poll(unsigned long data)
 {
 	unsigned long flags;
 
@@ -398,7 +401,7 @@ static void lubbock_mmc_poll(struct timer_list *unused)
 	if (LUB_IRQ_SET_CLR & (1 << 0))
 		mod_timer(&mmc_timer, jiffies + MMC_POLL_RATE);
 	else {
-		(void) mmc_detect_int(LUBBOCK_SD_IRQ, mmc_detect_int_data);
+		(void) mmc_detect_int(LUBBOCK_SD_IRQ, (void *)data);
 		enable_irq(LUBBOCK_SD_IRQ);
 	}
 }
@@ -418,8 +421,8 @@ static int lubbock_mci_init(struct device *dev,
 {
 	/* detect card insert/eject */
 	mmc_detect_int = detect_int;
-	mmc_detect_int_data = data;
-	timer_setup(&mmc_timer, lubbock_mmc_poll, 0);
+	init_timer(&mmc_timer);
+	mmc_timer.data = (unsigned long) data;
 	return request_irq(LUBBOCK_SD_IRQ, lubbock_detect_int,
 			   0, "lubbock-sd-detect", data);
 }

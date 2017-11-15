@@ -15,7 +15,7 @@
  * more details.
  */
 
-#include <linux/extcon-provider.h>
+#include <linux/extcon.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/mfd/intel_soc_pmic.h>

@@ -15,7 +15,6 @@
 #define _RTW_RF_C_
 
 #include <drv_types.h>
-#include <linux/kernel.h>
 
 
 struct ch_freq {
@@ -45,18 +44,20 @@ static struct ch_freq ch_freq_map[] = {
 	{216, 5080},/* Japan, means J16 */
 };
 
+static int ch_freq_map_num = (sizeof(ch_freq_map) / sizeof(struct ch_freq));
+
 u32 rtw_ch2freq(u32 channel)
 {
 	u8 i;
 	u32 freq = 0;
 
-	for (i = 0; i < ARRAY_SIZE(ch_freq_map); i++) {
+	for (i = 0; i < ch_freq_map_num; i++) {
 		if (channel == ch_freq_map[i].channel) {
 			freq = ch_freq_map[i].frequency;
 				break;
 		}
 	}
-	if (i == ARRAY_SIZE(ch_freq_map))
+	if (i == ch_freq_map_num)
 		freq = 2412;
 
 	return freq;

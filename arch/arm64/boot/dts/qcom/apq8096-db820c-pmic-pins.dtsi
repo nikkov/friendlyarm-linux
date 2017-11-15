@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 &pm8994_gpios {

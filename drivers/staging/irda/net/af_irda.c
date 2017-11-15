@@ -429,11 +429,11 @@ static void irda_selective_discovery_indication(discinfo_t *discovery,
  * We were waiting for a node to be discovered, but nothing has come up
  * so far. Wake up the user and tell him that we failed...
  */
-static void irda_discovery_timeout(struct timer_list *t)
+static void irda_discovery_timeout(u_long priv)
 {
 	struct irda_sock *self;
 
-	self = from_timer(self, t, watchdog);
+	self = (struct irda_sock *) priv;
 	BUG_ON(self == NULL);
 
 	/* Nothing for the caller */
@@ -2505,7 +2505,8 @@ bed:
 
 			/* Set watchdog timer to expire in <val> ms. */
 			self->errno = 0;
-			timer_setup(&self->watchdog, irda_discovery_timeout, 0);
+			setup_timer(&self->watchdog, irda_discovery_timeout,
+					(unsigned long)self);
 			mod_timer(&self->watchdog,
 				  jiffies + msecs_to_jiffies(val));
 

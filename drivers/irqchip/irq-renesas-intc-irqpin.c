@@ -389,8 +389,9 @@ MODULE_DEVICE_TABLE(of, intc_irqpin_dt_ids);
 
 static int intc_irqpin_probe(struct platform_device *pdev)
 {
-	const struct intc_irqpin_config *config;
+	const struct intc_irqpin_config *config = NULL;
 	struct device *dev = &pdev->dev;
+	const struct of_device_id *of_id;
 	struct intc_irqpin_priv *p;
 	struct intc_irqpin_iomem *i;
 	struct resource *io[INTC_IRQPIN_REG_NR];
@@ -421,9 +422,11 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	p->pdev = pdev;
 	platform_set_drvdata(pdev, p);
 
-	config = of_device_get_match_data(dev);
-	if (config)
+	of_id = of_match_device(intc_irqpin_dt_ids, dev);
+	if (of_id && of_id->data) {
+		config = of_id->data;
 		p->needs_clk = config->needs_clk;
+	}
 
 	p->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(p->clk)) {

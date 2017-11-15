@@ -775,9 +775,6 @@ static int _snd_pcm_new(struct snd_card *card, const char *id, int device,
 		.dev_register =	snd_pcm_dev_register,
 		.dev_disconnect = snd_pcm_dev_disconnect,
 	};
-	static struct snd_device_ops internal_ops = {
-		.dev_free = snd_pcm_dev_free,
-	};
 
 	if (snd_BUG_ON(!card))
 		return -ENXIO;
@@ -804,8 +801,7 @@ static int _snd_pcm_new(struct snd_card *card, const char *id, int device,
 	if (err < 0)
 		goto free_pcm;
 
-	err = snd_device_new(card, SNDRV_DEV_PCM, pcm,
-			     internal ? &internal_ops : &ops);
+	err = snd_device_new(card, SNDRV_DEV_PCM, pcm, &ops);
 	if (err < 0)
 		goto free_pcm;
 
@@ -1103,6 +1099,8 @@ static int snd_pcm_dev_register(struct snd_device *device)
 	if (snd_BUG_ON(!device || !device->device_data))
 		return -ENXIO;
 	pcm = device->device_data;
+	if (pcm->internal)
+		return 0;
 
 	mutex_lock(&register_mutex);
 	err = snd_pcm_add(pcm);
@@ -1154,10 +1152,6 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 		for (substream = pcm->streams[cidx].substream; substream; substream = substream->next) {
 			snd_pcm_stream_lock_irq(substream);
 			if (substream->runtime) {
-				if (snd_pcm_running(substream))
-					snd_pcm_stop(substream,
-						     SNDRV_PCM_STATE_DISCONNECTED);
-				/* to be sure, set the state unconditionally */
 				substream->runtime->status->state = SNDRV_PCM_STATE_DISCONNECTED;
 				wake_up(&substream->runtime->sleep);
 				wake_up(&substream->runtime->tsleep);
@@ -1165,10 +1159,12 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 			snd_pcm_stream_unlock_irq(substream);
 		}
 	}
-
-	pcm_call_notify(pcm, n_disconnect);
+	if (!pcm->internal) {
+		pcm_call_notify(pcm, n_disconnect);
+	}
 	for (cidx = 0; cidx < 2; cidx++) {
-		snd_unregister_device(&pcm->streams[cidx].dev);
+		if (!pcm->internal)
+			snd_unregister_device(&pcm->streams[cidx].dev);
 		free_chmap(&pcm->streams[cidx]);
 	}
 	mutex_unlock(&pcm->open_mutex);

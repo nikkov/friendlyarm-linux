@@ -1,9 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "ddk750_chip.h"
 #include "ddk750_reg.h"
 #include "ddk750_power.h"
 
-void ddk750_set_dpms(enum dpms state)
+void ddk750_set_dpms(DPMS_t state)
 {
 	unsigned int value;
 

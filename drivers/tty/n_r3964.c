@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-1.0+
 /* r3964 linediscipline for linux
  *
  * -----------------------------------------------------------
@@ -6,6 +5,9 @@
  * Philips Automation Projects
  * Kassel (Germany)
  * -----------------------------------------------------------
+ * This software may be used and distributed according to the terms of
+ * the GNU General Public License, incorporated herein by reference.
+ *
  * Author:
  * L. Haag
  *

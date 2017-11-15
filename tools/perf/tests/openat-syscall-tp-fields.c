@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/err.h>
 #include "perf.h"
 #include "evlist.h"

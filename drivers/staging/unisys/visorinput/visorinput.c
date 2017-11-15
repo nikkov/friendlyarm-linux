@@ -23,7 +23,6 @@
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/uuid.h>
 
 #include "visorbus.h"
@@ -712,9 +711,8 @@ out:
 
 /* GUIDS for all channel types supported by this driver. */
 static struct visor_channeltype_descriptor visorinput_channel_types[] = {
-	{ VISOR_KEYBOARD_CHANNEL_GUID, "keyboard",
-	  sizeof(struct channel_header), 0 },
-	{ VISOR_MOUSE_CHANNEL_GUID, "mouse", sizeof(struct channel_header), 0 },
+	{ VISOR_KEYBOARD_CHANNEL_GUID, "keyboard"},
+	{ VISOR_MOUSE_CHANNEL_GUID, "mouse"},
 	{}
 };
 

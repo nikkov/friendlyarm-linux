@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX__INIT_TASK_H
 #define _LINUX__INIT_TASK_H
 

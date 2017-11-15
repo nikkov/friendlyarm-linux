@@ -68,9 +68,9 @@ static void irlan_check_response_param(struct irlan_cb *self, char *param,
 				       char *value, int val_len);
 static void irlan_client_open_ctrl_tsap(struct irlan_cb *self);
 
-static void irlan_client_kick_timer_expired(struct timer_list *t)
+static void irlan_client_kick_timer_expired(void *data)
 {
-	struct irlan_cb *self = from_timer(self, t, client.kick_timer);
+	struct irlan_cb *self = (struct irlan_cb *) data;
 
 	IRDA_ASSERT(self != NULL, return;);
 	IRDA_ASSERT(self->magic == IRLAN_MAGIC, return;);
@@ -89,7 +89,7 @@ static void irlan_client_kick_timer_expired(struct timer_list *t)
 
 static void irlan_client_start_kick_timer(struct irlan_cb *self, int timeout)
 {
-	irda_start_timer(&self->client.kick_timer, timeout,
+	irda_start_timer(&self->client.kick_timer, timeout, (void *) self,
 			 irlan_client_kick_timer_expired);
 }
 

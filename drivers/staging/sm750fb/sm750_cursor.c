@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -18,6 +17,8 @@
 
 #include "sm750.h"
 #include "sm750_cursor.h"
+
+
 
 #define poke32(addr, data) \
 writel((data), cursor->mmio + (addr))
@@ -43,6 +44,7 @@ writel((data), cursor->mmio + (addr))
 
 #define HWC_COLOR_3                         0xC
 #define HWC_COLOR_3_RGB565_MASK             0xffff
+
 
 /* hw_cursor_xxx works for voyager,718 and 750 */
 void sm750_hw_cursor_enable(struct lynx_cursor *cursor)
@@ -131,6 +133,7 @@ void sm750_hw_cursor_setData(struct lynx_cursor *cursor, u16 rop,
 		}
 	}
 }
+
 
 void sm750_hw_cursor_setData2(struct lynx_cursor *cursor, u16 rop,
 			      const u8 *pcol, const u8 *pmsk)

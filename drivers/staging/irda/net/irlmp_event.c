@@ -165,7 +165,7 @@ void irlmp_do_lap_event(struct lap_cb *self, IRLMP_EVENT event,
 	(*lap_state[self->lap_state]) (self, event, skb);
 }
 
-void irlmp_discovery_timer_expired(struct timer_list *t)
+void irlmp_discovery_timer_expired(void *data)
 {
 	/* We always cleanup the log (active & passive discovery) */
 	irlmp_do_expiry();
@@ -176,9 +176,9 @@ void irlmp_discovery_timer_expired(struct timer_list *t)
 	irlmp_start_discovery_timer(irlmp, sysctl_discovery_timeout * HZ);
 }
 
-void irlmp_watchdog_timer_expired(struct timer_list *t)
+void irlmp_watchdog_timer_expired(void *data)
 {
-	struct lsap_cb *self = from_timer(self, t, watchdog_timer);
+	struct lsap_cb *self = (struct lsap_cb *) data;
 
 	IRDA_ASSERT(self != NULL, return;);
 	IRDA_ASSERT(self->magic == LMP_LSAP_MAGIC, return;);
@@ -186,9 +186,9 @@ void irlmp_watchdog_timer_expired(struct timer_list *t)
 	irlmp_do_lsap_event(self, LM_WATCHDOG_TIMEOUT, NULL);
 }
 
-void irlmp_idle_timer_expired(struct timer_list *t)
+void irlmp_idle_timer_expired(void *data)
 {
-	struct lap_cb *self = from_timer(self, t, idle_timer);
+	struct lap_cb *self = (struct lap_cb *) data;
 
 	IRDA_ASSERT(self != NULL, return;);
 	IRDA_ASSERT(self->magic == LMP_LAP_MAGIC, return;);

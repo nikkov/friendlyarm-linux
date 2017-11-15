@@ -72,7 +72,6 @@ struct loop_cmd {
 	long ret;
 	struct kiocb iocb;
 	struct bio_vec *bvec;
-	struct cgroup_subsys_state *css;
 };
 
 /* Support for loadable transfer modules */

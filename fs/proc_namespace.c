@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * fs/proc_namespace.c - handling of /proc/<pid>/{mounts,mountinfo,mountstats}
  *
@@ -28,7 +27,7 @@ static unsigned mounts_poll(struct file *file, poll_table *wait)
 
 	poll_wait(file, &p->ns->poll, wait);
 
-	event = READ_ONCE(ns->event);
+	event = ACCESS_ONCE(ns->event);
 	if (m->poll_event != event) {
 		m->poll_event = event;
 		res |= POLLERR | POLLPRI;

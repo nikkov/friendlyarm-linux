@@ -70,7 +70,7 @@ static int mode;
 static char *tvmem[TVMEMSIZE];
 
 static char *check[] = {
-	"des", "md5", "des3_ede", "rot13", "sha1", "sha224", "sha256", "sm3",
+	"des", "md5", "des3_ede", "rot13", "sha1", "sha224", "sha256",
 	"blowfish", "twofish", "serpent", "sha384", "sha512", "md4", "aes",
 	"cast6", "arc4", "michael_mic", "deflate", "crc32c", "tea", "xtea",
 	"khazad", "wp512", "wp384", "wp256", "tnepres", "xeta",  "fcrypt",
@@ -79,11 +79,34 @@ static char *check[] = {
 	NULL
 };
 
+struct tcrypt_result {
+	struct completion completion;
+	int err;
+};
+
+static void tcrypt_complete(struct crypto_async_request *req, int err)
+{
+	struct tcrypt_result *res = req->data;
+
+	if (err == -EINPROGRESS)
+		return;
+
+	res->err = err;
+	complete(&res->completion);
+}
+
 static inline int do_one_aead_op(struct aead_request *req, int ret)
 {
-	struct crypto_wait *wait = req->base.data;
+	if (ret == -EINPROGRESS || ret == -EBUSY) {
+		struct tcrypt_result *tr = req->base.data;
 
-	return crypto_wait_req(ret, wait);
+		ret = wait_for_completion_interruptible(&tr->completion);
+		if (!ret)
+			ret = tr->err;
+		reinit_completion(&tr->completion);
+	}
+
+	return ret;
 }
 
 static int test_aead_jiffies(struct aead_request *req, int enc,
@@ -225,7 +248,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 	char *axbuf[XBUFSIZE];
 	unsigned int *b_size;
 	unsigned int iv_len;
-	struct crypto_wait wait;
+	struct tcrypt_result result;
 
 	iv = kzalloc(MAX_IVLEN, GFP_KERNEL);
 	if (!iv)
@@ -261,7 +284,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 		goto out_notfm;
 	}
 
-	crypto_init_wait(&wait);
+	init_completion(&result.completion);
 	printk(KERN_INFO "\ntesting speed of %s (%s) %s\n", algo,
 			get_driver_name(crypto_aead, tfm), e);
 
@@ -273,7 +296,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 	}
 
 	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				  crypto_req_done, &wait);
+				  tcrypt_complete, &result);
 
 	i = 0;
 	do {
@@ -317,7 +340,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 			}
 
 			sg_init_aead(sg, xbuf,
-				    *b_size + (enc ? 0 : authsize));
+				    *b_size + (enc ? authsize : 0));
 
 			sg_init_aead(sgout, xoutbuf,
 				    *b_size + (enc ? authsize : 0));
@@ -325,9 +348,7 @@ static void test_aead_speed(const char *algo, int enc, unsigned int secs,
 			sg_set_buf(&sg[0], assoc, aad_size);
 			sg_set_buf(&sgout[0], assoc, aad_size);
 
-			aead_request_set_crypt(req, sg, sgout,
-					       *b_size + (enc ? 0 : authsize),
-					       iv);
+			aead_request_set_crypt(req, sg, sgout, *b_size, iv);
 			aead_request_set_ad(req, aad_size);
 
 			if (secs)
@@ -360,6 +381,7 @@ out_noaxbuf:
 	testmgr_free_buf(xbuf);
 out_noxbuf:
 	kfree(iv);
+	return;
 }
 
 static void test_hash_sg_init(struct scatterlist *sg)
@@ -375,16 +397,21 @@ static void test_hash_sg_init(struct scatterlist *sg)
 
 static inline int do_one_ahash_op(struct ahash_request *req, int ret)
 {
-	struct crypto_wait *wait = req->base.data;
+	if (ret == -EINPROGRESS || ret == -EBUSY) {
+		struct tcrypt_result *tr = req->base.data;
 
-	return crypto_wait_req(ret, wait);
+		wait_for_completion(&tr->completion);
+		reinit_completion(&tr->completion);
+		ret = tr->err;
+	}
+	return ret;
 }
 
 struct test_mb_ahash_data {
 	struct scatterlist sg[TVMEMSIZE];
 	char result[64];
 	struct ahash_request *req;
-	struct crypto_wait wait;
+	struct tcrypt_result tresult;
 	char *xbuf[XBUFSIZE];
 };
 
@@ -413,7 +440,7 @@ static void test_mb_ahash_speed(const char *algo, unsigned int sec,
 		if (testmgr_alloc_buf(data[i].xbuf))
 			goto out;
 
-		crypto_init_wait(&data[i].wait);
+		init_completion(&data[i].tresult.completion);
 
 		data[i].req = ahash_request_alloc(tfm, GFP_KERNEL);
 		if (!data[i].req) {
@@ -422,8 +449,8 @@ static void test_mb_ahash_speed(const char *algo, unsigned int sec,
 			goto out;
 		}
 
-		ahash_request_set_callback(data[i].req, 0, crypto_req_done,
-					   &data[i].wait);
+		ahash_request_set_callback(data[i].req, 0,
+					   tcrypt_complete, &data[i].tresult);
 		test_hash_sg_init(data[i].sg);
 	}
 
@@ -465,16 +492,16 @@ static void test_mb_ahash_speed(const char *algo, unsigned int sec,
 			if (ret)
 				break;
 
-			crypto_req_done(&data[k].req->base, 0);
+			complete(&data[k].tresult.completion);
+			data[k].tresult.err = 0;
 		}
 
 		for (j = 0; j < k; j++) {
-			struct crypto_wait *wait = &data[j].wait;
-			int wait_ret;
+			struct tcrypt_result *tr = &data[j].tresult;
 
-			wait_ret = crypto_wait_req(-EINPROGRESS, wait);
-			if (wait_ret)
-				ret = wait_ret;
+			wait_for_completion(&tr->completion);
+			if (tr->err)
+				ret = tr->err;
 		}
 
 		end = get_cycles();
@@ -652,7 +679,7 @@ static void test_ahash_speed_common(const char *algo, unsigned int secs,
 				    struct hash_speed *speed, unsigned mask)
 {
 	struct scatterlist sg[TVMEMSIZE];
-	struct crypto_wait wait;
+	struct tcrypt_result tresult;
 	struct ahash_request *req;
 	struct crypto_ahash *tfm;
 	char *output;
@@ -681,9 +708,9 @@ static void test_ahash_speed_common(const char *algo, unsigned int secs,
 		goto out;
 	}
 
-	crypto_init_wait(&wait);
+	init_completion(&tresult.completion);
 	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				   crypto_req_done, &wait);
+				   tcrypt_complete, &tresult);
 
 	output = kmalloc(MAX_DIGEST_SIZE, GFP_KERNEL);
 	if (!output)
@@ -738,9 +765,15 @@ static void test_hash_speed(const char *algo, unsigned int secs,
 
 static inline int do_one_acipher_op(struct skcipher_request *req, int ret)
 {
-	struct crypto_wait *wait = req->base.data;
+	if (ret == -EINPROGRESS || ret == -EBUSY) {
+		struct tcrypt_result *tr = req->base.data;
 
-	return crypto_wait_req(ret, wait);
+		wait_for_completion(&tr->completion);
+		reinit_completion(&tr->completion);
+		ret = tr->err;
+	}
+
+	return ret;
 }
 
 static int test_acipher_jiffies(struct skcipher_request *req, int enc,
@@ -820,7 +853,7 @@ static void test_skcipher_speed(const char *algo, int enc, unsigned int secs,
 				unsigned int tcount, u8 *keysize, bool async)
 {
 	unsigned int ret, i, j, k, iv_len;
-	struct crypto_wait wait;
+	struct tcrypt_result tresult;
 	const char *key;
 	char iv[128];
 	struct skcipher_request *req;
@@ -833,7 +866,7 @@ static void test_skcipher_speed(const char *algo, int enc, unsigned int secs,
 	else
 		e = "decryption";
 
-	crypto_init_wait(&wait);
+	init_completion(&tresult.completion);
 
 	tfm = crypto_alloc_skcipher(algo, 0, async ? 0 : CRYPTO_ALG_ASYNC);
 
@@ -854,7 +887,7 @@ static void test_skcipher_speed(const char *algo, int enc, unsigned int secs,
 	}
 
 	skcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				      crypto_req_done, &wait);
+				      tcrypt_complete, &tresult);
 
 	i = 0;
 	do {
@@ -1236,10 +1269,6 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 		ret += tcrypt_test("sha3-512");
 		break;
 
-	case 52:
-		ret += tcrypt_test("sm3");
-		break;
-
 	case 100:
 		ret += tcrypt_test("hmac(md5)");
 		break;
@@ -1574,116 +1603,115 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 				  speed_template_32);
 		break;
 
+
 	case 300:
 		if (alg) {
 			test_hash_speed(alg, sec, generic_hash_speed_template);
 			break;
 		}
+
 		/* fall through */
+
 	case 301:
 		test_hash_speed("md4", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 302:
 		test_hash_speed("md5", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 303:
 		test_hash_speed("sha1", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 304:
 		test_hash_speed("sha256", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 305:
 		test_hash_speed("sha384", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 306:
 		test_hash_speed("sha512", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 307:
 		test_hash_speed("wp256", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 308:
 		test_hash_speed("wp384", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 309:
 		test_hash_speed("wp512", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 310:
 		test_hash_speed("tgr128", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 311:
 		test_hash_speed("tgr160", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 312:
 		test_hash_speed("tgr192", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 313:
 		test_hash_speed("sha224", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 314:
 		test_hash_speed("rmd128", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 315:
 		test_hash_speed("rmd160", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 316:
 		test_hash_speed("rmd256", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 317:
 		test_hash_speed("rmd320", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 318:
 		test_hash_speed("ghash-generic", sec, hash_speed_template_16);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 319:
 		test_hash_speed("crc32c", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 320:
 		test_hash_speed("crct10dif", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 321:
 		test_hash_speed("poly1305", sec, poly1305_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 322:
 		test_hash_speed("sha3-224", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 323:
 		test_hash_speed("sha3-256", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 324:
 		test_hash_speed("sha3-384", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 325:
 		test_hash_speed("sha3-512", sec, generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
-		/* fall through */
-	case 326:
-		test_hash_speed("sm3", sec, generic_hash_speed_template);
-		if (mode > 300 && mode < 400) break;
-		/* fall through */
+
 	case 399:
 		break;
 
@@ -1692,107 +1720,106 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 			test_ahash_speed(alg, sec, generic_hash_speed_template);
 			break;
 		}
+
 		/* fall through */
+
 	case 401:
 		test_ahash_speed("md4", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 402:
 		test_ahash_speed("md5", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 403:
 		test_ahash_speed("sha1", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 404:
 		test_ahash_speed("sha256", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 405:
 		test_ahash_speed("sha384", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 406:
 		test_ahash_speed("sha512", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 407:
 		test_ahash_speed("wp256", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 408:
 		test_ahash_speed("wp384", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 409:
 		test_ahash_speed("wp512", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 410:
 		test_ahash_speed("tgr128", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 411:
 		test_ahash_speed("tgr160", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 412:
 		test_ahash_speed("tgr192", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 413:
 		test_ahash_speed("sha224", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 414:
 		test_ahash_speed("rmd128", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 415:
 		test_ahash_speed("rmd160", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 416:
 		test_ahash_speed("rmd256", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 417:
 		test_ahash_speed("rmd320", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 418:
 		test_ahash_speed("sha3-224", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 419:
 		test_ahash_speed("sha3-256", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 420:
 		test_ahash_speed("sha3-384", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
+
 	case 421:
 		test_ahash_speed("sha3-512", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 422:
 		test_mb_ahash_speed("sha1", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 423:
 		test_mb_ahash_speed("sha256", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 424:
 		test_mb_ahash_speed("sha512", sec, generic_hash_speed_template);
 		if (mode > 400 && mode < 500) break;
-		/* fall through */
-	case 425:
-		test_mb_ahash_speed("sm3", sec, generic_hash_speed_template);
-		if (mode > 400 && mode < 500) break;
-		/* fall through */
+
 	case 499:
 		break;
 

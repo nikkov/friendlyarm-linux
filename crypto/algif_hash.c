@@ -26,7 +26,7 @@ struct hash_ctx {
 
 	u8 *result;
 
-	struct crypto_wait wait;
+	struct af_alg_completion completion;
 
 	unsigned int len;
 	bool more;
@@ -88,7 +88,8 @@ static int hash_sendmsg(struct socket *sock, struct msghdr *msg,
 		if ((msg->msg_flags & MSG_MORE))
 			hash_free_result(sk, ctx);
 
-		err = crypto_wait_req(crypto_ahash_init(&ctx->req), &ctx->wait);
+		err = af_alg_wait_for_completion(crypto_ahash_init(&ctx->req),
+						&ctx->completion);
 		if (err)
 			goto unlock;
 	}
@@ -109,8 +110,8 @@ static int hash_sendmsg(struct socket *sock, struct msghdr *msg,
 
 		ahash_request_set_crypt(&ctx->req, ctx->sgl.sg, NULL, len);
 
-		err = crypto_wait_req(crypto_ahash_update(&ctx->req),
-				      &ctx->wait);
+		err = af_alg_wait_for_completion(crypto_ahash_update(&ctx->req),
+						 &ctx->completion);
 		af_alg_free_sg(&ctx->sgl);
 		if (err)
 			goto unlock;
@@ -128,8 +129,8 @@ static int hash_sendmsg(struct socket *sock, struct msghdr *msg,
 			goto unlock;
 
 		ahash_request_set_crypt(&ctx->req, NULL, ctx->result, 0);
-		err = crypto_wait_req(crypto_ahash_final(&ctx->req),
-				      &ctx->wait);
+		err = af_alg_wait_for_completion(crypto_ahash_final(&ctx->req),
+						 &ctx->completion);
 	}
 
 unlock:
@@ -170,7 +171,7 @@ static ssize_t hash_sendpage(struct socket *sock, struct page *page,
 	} else {
 		if (!ctx->more) {
 			err = crypto_ahash_init(&ctx->req);
-			err = crypto_wait_req(err, &ctx->wait);
+			err = af_alg_wait_for_completion(err, &ctx->completion);
 			if (err)
 				goto unlock;
 		}
@@ -178,7 +179,7 @@ static ssize_t hash_sendpage(struct socket *sock, struct page *page,
 		err = crypto_ahash_update(&ctx->req);
 	}
 
-	err = crypto_wait_req(err, &ctx->wait);
+	err = af_alg_wait_for_completion(err, &ctx->completion);
 	if (err)
 		goto unlock;
 
@@ -214,16 +215,17 @@ static int hash_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
 	ahash_request_set_crypt(&ctx->req, NULL, ctx->result, 0);
 
 	if (!result && !ctx->more) {
-		err = crypto_wait_req(crypto_ahash_init(&ctx->req),
-				      &ctx->wait);
+		err = af_alg_wait_for_completion(
+				crypto_ahash_init(&ctx->req),
+				&ctx->completion);
 		if (err)
 			goto unlock;
 	}
 
 	if (!result || ctx->more) {
 		ctx->more = 0;
-		err = crypto_wait_req(crypto_ahash_final(&ctx->req),
-				      &ctx->wait);
+		err = af_alg_wait_for_completion(crypto_ahash_final(&ctx->req),
+						 &ctx->completion);
 		if (err)
 			goto unlock;
 	}
@@ -474,13 +476,13 @@ static int hash_accept_parent_nokey(void *private, struct sock *sk)
 	ctx->result = NULL;
 	ctx->len = len;
 	ctx->more = 0;
-	crypto_init_wait(&ctx->wait);
+	af_alg_init_completion(&ctx->completion);
 
 	ask->private = ctx;
 
 	ahash_request_set_tfm(&ctx->req, hash);
 	ahash_request_set_callback(&ctx->req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				   crypto_req_done, &ctx->wait);
+				   af_alg_complete, &ctx->completion);
 
 	sk->sk_destruct = hash_sock_destruct;
 

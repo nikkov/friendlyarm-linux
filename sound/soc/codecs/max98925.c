@@ -579,7 +579,7 @@ static int max98925_i2c_probe(struct i2c_client *i2c,
 		ret = PTR_ERR(max98925->regmap);
 		dev_err(&i2c->dev,
 				"Failed to allocate regmap: %d\n", ret);
-		return ret;
+		goto err_out;
 	}
 
 	if (!of_property_read_u32(i2c->dev.of_node, "vmon-slot-no", &value)) {
@@ -596,20 +596,16 @@ static int max98925_i2c_probe(struct i2c_client *i2c,
 		}
 		max98925->i_slot = value;
 	}
-
-	ret = regmap_read(max98925->regmap, MAX98925_REV_VERSION, &reg);
-	if (ret < 0) {
-		dev_err(&i2c->dev, "Read revision failed\n");
-		return ret;
-	}
-
-	if ((reg != MAX98925_VERSION) && (reg != MAX98925_VERSION1)) {
-		ret = -ENODEV;
-		dev_err(&i2c->dev, "Invalid revision (%d 0x%02X)\n",
+	ret = regmap_read(max98925->regmap,
+			MAX98925_REV_VERSION, &reg);
+	if ((ret < 0) ||
+		((reg != MAX98925_VERSION) &&
+		(reg != MAX98925_VERSION1))) {
+		dev_err(&i2c->dev,
+			"device initialization error (%d 0x%02X)\n",
 			ret, reg);
-		return ret;
+		goto err_out;
 	}
-
 	dev_info(&i2c->dev, "device version 0x%02X\n", reg);
 
 	ret = snd_soc_register_codec(&i2c->dev, &soc_codec_dev_max98925,
@@ -617,6 +613,7 @@ static int max98925_i2c_probe(struct i2c_client *i2c,
 	if (ret < 0)
 		dev_err(&i2c->dev,
 				"Failed to register codec: %d\n", ret);
+err_out:
 	return ret;
 }
 

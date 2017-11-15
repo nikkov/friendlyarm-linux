@@ -667,6 +667,7 @@ static const struct iio_info ad7746_info = {
 	.attrs = &ad7746_attribute_group,
 	.read_raw = ad7746_read_raw,
 	.write_raw = ad7746_write_raw,
+	.driver_module = THIS_MODULE,
 };
 
 /*

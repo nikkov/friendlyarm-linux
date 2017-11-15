@@ -86,7 +86,7 @@ xfs_file_compat_ioctl(
 extern int
 xfs_set_dmattrs(
 	struct xfs_inode	*ip,
-	uint			evmask,
-	uint16_t		state);
+	u_int			evmask,
+	u_int16_t		state);
 
 #endif

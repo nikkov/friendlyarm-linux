@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_SWAIT_H
 #define _LINUX_SWAIT_H
 
@@ -10,16 +9,13 @@
 /*
  * Simple wait queues
  *
- * While these are very similar to regular wait queues (wait.h) the most
- * important difference is that the simple waitqueue allows for deterministic
- * behaviour -- IOW it has strictly bounded IRQ and lock hold times.
+ * While these are very similar to the other/complex wait queues (wait.h) the
+ * most important difference is that the simple waitqueue allows for
+ * deterministic behaviour -- IOW it has strictly bounded IRQ and lock hold
+ * times.
  *
- * Mainly, this is accomplished by two things. Firstly not allowing swake_up_all
- * from IRQ disabled, and dropping the lock upon every wakeup, giving a higher
- * priority task a chance to run.
- *
- * Secondly, we had to drop a fair number of features of the other waitqueue
- * code; notably:
+ * In order to make this so, we had to drop a fair number of features of the
+ * other waitqueue code; notably:
  *
  *  - mixing INTERRUPTIBLE and UNINTERRUPTIBLE sleeps on the same waitqueue;
  *    all wakeups are TASK_NORMAL in order to avoid O(n) lookups for the right
@@ -28,14 +24,12 @@
  *  - the exclusive mode; because this requires preserving the list order
  *    and this is hard.
  *
- *  - custom wake callback functions; because you cannot give any guarantees
- *    about random code. This also allows swait to be used in RT, such that
- *    raw spinlock can be used for the swait queue head.
+ *  - custom wake functions; because you cannot give any guarantees about
+ *    random code.
  *
- * As a side effect of these; the data structures are slimmer albeit more ad-hoc.
- * For all the above, note that simple wait queues should _only_ be used under
- * very specific realtime constraints -- it is best to stick with the regular
- * wait queues in most cases.
+ * As a side effect of this; the data structures are slimmer.
+ *
+ * One would recommend using this wait queue where possible.
  */
 
 struct task_struct;

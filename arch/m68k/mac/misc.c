@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Miscellaneous Mac68K-specific stuff
  */

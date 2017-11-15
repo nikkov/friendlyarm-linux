@@ -895,6 +895,7 @@ static int stm32_hash_enqueue(struct ahash_request *req, unsigned int op)
 static int stm32_hash_update(struct ahash_request *req)
 {
 	struct stm32_hash_request_ctx *rctx = ahash_request_ctx(req);
+	int ret;
 
 	if (!req->nbytes || !(rctx->flags & HASH_FLAGS_CPU))
 		return 0;
@@ -908,7 +909,12 @@ static int stm32_hash_update(struct ahash_request *req)
 		return 0;
 	}
 
-	return stm32_hash_enqueue(req, HASH_OP_UPDATE);
+	ret = stm32_hash_enqueue(req, HASH_OP_UPDATE);
+
+	if (rctx->flags & HASH_FLAGS_FINUP)
+		return ret;
+
+	return 0;
 }
 
 static int stm32_hash_final(struct ahash_request *req)
@@ -1064,6 +1070,7 @@ static int stm32_hash_cra_sha256_init(struct crypto_tfm *tfm)
 static irqreturn_t stm32_hash_irq_thread(int irq, void *dev_id)
 {
 	struct stm32_hash_dev *hdev = dev_id;
+	int err;
 
 	if (HASH_FLAGS_CPU & hdev->flags) {
 		if (HASH_FLAGS_OUTPUT_READY & hdev->flags) {
@@ -1080,8 +1087,8 @@ static irqreturn_t stm32_hash_irq_thread(int irq, void *dev_id)
 	return IRQ_HANDLED;
 
 finish:
-	/* Finish current request */
-	stm32_hash_finish_req(hdev->req, 0);
+	/*Finish current request */
+	stm32_hash_finish_req(hdev->req, err);
 
 	return IRQ_HANDLED;
 }
@@ -1404,16 +1411,19 @@ MODULE_DEVICE_TABLE(of, stm32_hash_of_match);
 static int stm32_hash_get_of_match(struct stm32_hash_dev *hdev,
 				   struct device *dev)
 {
+	const struct of_device_id *match;
 	int err;
 
-	hdev->pdata = of_device_get_match_data(dev);
-	if (!hdev->pdata) {
+	match = of_match_device(stm32_hash_of_match, dev);
+	if (!match) {
 		dev_err(dev, "no compatible OF match\n");
 		return -EINVAL;
 	}
 
 	err = of_property_read_u32(dev->of_node, "dma-maxburst",
 				   &hdev->dma_maxburst);
+
+	hdev->pdata = match->data;
 
 	return err;
 }

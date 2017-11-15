@@ -103,7 +103,7 @@ static DEFINE_MUTEX(smu_part_access);
 static int smu_irq_inited;
 static unsigned long smu_cmdbuf_abs;
 
-static void smu_i2c_retry(struct timer_list *t);
+static void smu_i2c_retry(unsigned long data);
 
 /*
  * SMU driver low level stuff
@@ -582,7 +582,9 @@ static int smu_late_init(void)
 	if (!smu)
 		return 0;
 
-	timer_setup(&smu->i2c_timer, smu_i2c_retry, 0);
+	init_timer(&smu->i2c_timer);
+	smu->i2c_timer.function = smu_i2c_retry;
+	smu->i2c_timer.data = (unsigned long)smu;
 
 	if (smu->db_node) {
 		smu->db_irq = irq_of_parse_and_map(smu->db_node, 0);
@@ -753,7 +755,7 @@ static void smu_i2c_complete_command(struct smu_i2c_cmd *cmd, int fail)
 }
 
 
-static void smu_i2c_retry(struct timer_list *unused)
+static void smu_i2c_retry(unsigned long data)
 {
 	struct smu_i2c_cmd	*cmd = smu->cmd_i2c_cur;
 
@@ -793,7 +795,7 @@ static void smu_i2c_low_completion(struct smu_cmd *scmd, void *misc)
 		BUG_ON(cmd != smu->cmd_i2c_cur);
 		if (!smu_irq_inited) {
 			mdelay(5);
-			smu_i2c_retry(NULL);
+			smu_i2c_retry(0);
 			return;
 		}
 		mod_timer(&smu->i2c_timer, jiffies + msecs_to_jiffies(5));

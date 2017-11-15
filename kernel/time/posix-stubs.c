@@ -117,7 +117,8 @@ SYSCALL_DEFINE4(clock_nanosleep, const clockid_t, which_clock, int, flags,
 		const struct timespec __user *, rqtp,
 		struct timespec __user *, rmtp)
 {
-	struct timespec64 t;
+	struct timespec64 t64;
+	struct timespec t;
 
 	switch (which_clock) {
 	case CLOCK_REALTIME:
@@ -128,15 +129,16 @@ SYSCALL_DEFINE4(clock_nanosleep, const clockid_t, which_clock, int, flags,
 		return -EINVAL;
 	}
 
-	if (get_timespec64(&t, rqtp))
+	if (copy_from_user(&t, rqtp, sizeof (struct timespec)))
 		return -EFAULT;
-	if (!timespec64_valid(&t))
+	t64 = timespec_to_timespec64(t);
+	if (!timespec64_valid(&t64))
 		return -EINVAL;
 	if (flags & TIMER_ABSTIME)
 		rmtp = NULL;
 	current->restart_block.nanosleep.type = rmtp ? TT_NATIVE : TT_NONE;
 	current->restart_block.nanosleep.rmtp = rmtp;
-	return hrtimer_nanosleep(&t, flags & TIMER_ABSTIME ?
+	return hrtimer_nanosleep(&t64, flags & TIMER_ABSTIME ?
 				 HRTIMER_MODE_ABS : HRTIMER_MODE_REL,
 				 which_clock);
 }
@@ -201,7 +203,8 @@ COMPAT_SYSCALL_DEFINE4(clock_nanosleep, clockid_t, which_clock, int, flags,
 		       struct compat_timespec __user *, rqtp,
 		       struct compat_timespec __user *, rmtp)
 {
-	struct timespec64 t;
+	struct timespec64 t64;
+	struct timespec t;
 
 	switch (which_clock) {
 	case CLOCK_REALTIME:
@@ -212,15 +215,16 @@ COMPAT_SYSCALL_DEFINE4(clock_nanosleep, clockid_t, which_clock, int, flags,
 		return -EINVAL;
 	}
 
-	if (compat_get_timespec64(&t, rqtp))
+	if (compat_get_timespec(&t, rqtp))
 		return -EFAULT;
-	if (!timespec64_valid(&t))
+	t64 = timespec_to_timespec64(t);
+	if (!timespec64_valid(&t64))
 		return -EINVAL;
 	if (flags & TIMER_ABSTIME)
 		rmtp = NULL;
 	current->restart_block.nanosleep.type = rmtp ? TT_COMPAT : TT_NONE;
 	current->restart_block.nanosleep.compat_rmtp = rmtp;
-	return hrtimer_nanosleep(&t, flags & TIMER_ABSTIME ?
+	return hrtimer_nanosleep(&t64, flags & TIMER_ABSTIME ?
 				 HRTIMER_MODE_ABS : HRTIMER_MODE_REL,
 				 which_clock);
 }

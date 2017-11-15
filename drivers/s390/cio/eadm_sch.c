@@ -43,7 +43,13 @@ static debug_info_t *eadm_debug;
 
 static void EADM_LOG_HEX(int level, void *data, int length)
 {
-	debug_event(eadm_debug, level, data, length);
+	if (!debug_level_enabled(eadm_debug, level))
+		return;
+	while (length > 0) {
+		debug_event(eadm_debug, level, data, length);
+		length -= eadm_debug->buf_size;
+		data += eadm_debug->buf_size;
+	}
 }
 
 static void orb_init(union orb *orb)

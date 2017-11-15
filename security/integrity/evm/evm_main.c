@@ -49,9 +49,6 @@ char *evm_config_xattrnames[] = {
 	XATTR_NAME_SMACKMMAP,
 #endif
 #endif
-#ifdef CONFIG_SECURITY_APPARMOR
-	XATTR_NAME_APPARMOR,
-#endif
 #ifdef CONFIG_IMA_APPRAISE
 	XATTR_NAME_IMA,
 #endif

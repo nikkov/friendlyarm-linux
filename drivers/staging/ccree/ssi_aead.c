@@ -92,17 +92,18 @@ static inline bool valid_assoclen(struct aead_request *req)
 
 static void ssi_aead_exit(struct crypto_aead *tfm)
 {
+	struct device *dev = NULL;
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
-	dev_dbg(dev, "Clearing context @%p for %s\n", crypto_aead_ctx(tfm),
-		crypto_tfm_alg_name(&tfm->base));
+	SSI_LOG_DEBUG("Clearing context @%p for %s\n",
+		      crypto_aead_ctx(tfm), crypto_tfm_alg_name(&tfm->base));
 
+	dev = &ctx->drvdata->plat_dev->dev;
 	/* Unmap enckey buffer */
 	if (ctx->enckey) {
 		dma_free_coherent(dev, AES_MAX_KEY_SIZE, ctx->enckey, ctx->enckey_dma_addr);
-		dev_dbg(dev, "Freed enckey DMA buffer enckey_dma_addr=%pad\n",
-			&ctx->enckey_dma_addr);
+		SSI_LOG_DEBUG("Freed enckey DMA buffer enckey_dma_addr=%pad\n",
+			      ctx->enckey_dma_addr);
 		ctx->enckey_dma_addr = 0;
 		ctx->enckey = NULL;
 	}
@@ -115,8 +116,8 @@ static void ssi_aead_exit(struct crypto_aead *tfm)
 					  xcbc->xcbc_keys,
 					  xcbc->xcbc_keys_dma_addr);
 		}
-		dev_dbg(dev, "Freed xcbc_keys DMA buffer xcbc_keys_dma_addr=%pad\n",
-			&xcbc->xcbc_keys_dma_addr);
+		SSI_LOG_DEBUG("Freed xcbc_keys DMA buffer xcbc_keys_dma_addr=%pad\n",
+			      xcbc->xcbc_keys_dma_addr);
 		xcbc->xcbc_keys_dma_addr = 0;
 		xcbc->xcbc_keys = NULL;
 	} else if (ctx->auth_mode != DRV_HASH_NULL) { /* HMAC auth. */
@@ -126,8 +127,8 @@ static void ssi_aead_exit(struct crypto_aead *tfm)
 			dma_free_coherent(dev, 2 * MAX_HMAC_DIGEST_SIZE,
 					  hmac->ipad_opad,
 					  hmac->ipad_opad_dma_addr);
-			dev_dbg(dev, "Freed ipad_opad DMA buffer ipad_opad_dma_addr=%pad\n",
-				&hmac->ipad_opad_dma_addr);
+			SSI_LOG_DEBUG("Freed ipad_opad DMA buffer ipad_opad_dma_addr=%pad\n",
+				      hmac->ipad_opad_dma_addr);
 			hmac->ipad_opad_dma_addr = 0;
 			hmac->ipad_opad = NULL;
 		}
@@ -135,8 +136,8 @@ static void ssi_aead_exit(struct crypto_aead *tfm)
 			dma_free_coherent(dev, MAX_HMAC_BLOCK_SIZE,
 					  hmac->padded_authkey,
 					  hmac->padded_authkey_dma_addr);
-			dev_dbg(dev, "Freed padded_authkey DMA buffer padded_authkey_dma_addr=%pad\n",
-				&hmac->padded_authkey_dma_addr);
+			SSI_LOG_DEBUG("Freed padded_authkey DMA buffer padded_authkey_dma_addr=%pad\n",
+				      hmac->padded_authkey_dma_addr);
 			hmac->padded_authkey_dma_addr = 0;
 			hmac->padded_authkey = NULL;
 		}
@@ -145,31 +146,29 @@ static void ssi_aead_exit(struct crypto_aead *tfm)
 
 static int ssi_aead_init(struct crypto_aead *tfm)
 {
+	struct device *dev;
 	struct aead_alg *alg = crypto_aead_alg(tfm);
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
 	struct ssi_crypto_alg *ssi_alg =
 			container_of(alg, struct ssi_crypto_alg, aead_alg);
-	struct device *dev = drvdata_to_dev(ssi_alg->drvdata);
-
-	dev_dbg(dev, "Initializing context @%p for %s\n", ctx,
-		crypto_tfm_alg_name(&tfm->base));
+	SSI_LOG_DEBUG("Initializing context @%p for %s\n", ctx, crypto_tfm_alg_name(&tfm->base));
 
 	/* Initialize modes in instance */
 	ctx->cipher_mode = ssi_alg->cipher_mode;
 	ctx->flow_mode = ssi_alg->flow_mode;
 	ctx->auth_mode = ssi_alg->auth_mode;
 	ctx->drvdata = ssi_alg->drvdata;
+	dev = &ctx->drvdata->plat_dev->dev;
 	crypto_aead_set_reqsize(tfm, sizeof(struct aead_req_ctx));
 
 	/* Allocate key buffer, cache line aligned */
 	ctx->enckey = dma_alloc_coherent(dev, AES_MAX_KEY_SIZE,
 					 &ctx->enckey_dma_addr, GFP_KERNEL);
 	if (!ctx->enckey) {
-		dev_err(dev, "Failed allocating key buffer\n");
+		SSI_LOG_ERR("Failed allocating key buffer\n");
 		goto init_failed;
 	}
-	dev_dbg(dev, "Allocated enckey buffer in context ctx->enckey=@%p\n",
-		ctx->enckey);
+	SSI_LOG_DEBUG("Allocated enckey buffer in context ctx->enckey=@%p\n", ctx->enckey);
 
 	/* Set default authlen value */
 
@@ -183,7 +182,7 @@ static int ssi_aead_init(struct crypto_aead *tfm)
 						     &xcbc->xcbc_keys_dma_addr,
 						     GFP_KERNEL);
 		if (!xcbc->xcbc_keys) {
-			dev_err(dev, "Failed allocating buffer for XCBC keys\n");
+			SSI_LOG_ERR("Failed allocating buffer for XCBC keys\n");
 			goto init_failed;
 		}
 	} else if (ctx->auth_mode != DRV_HASH_NULL) { /* HMAC authentication */
@@ -197,12 +196,12 @@ static int ssi_aead_init(struct crypto_aead *tfm)
 						     GFP_KERNEL);
 
 		if (!hmac->ipad_opad) {
-			dev_err(dev, "Failed allocating IPAD/OPAD buffer\n");
+			SSI_LOG_ERR("Failed allocating IPAD/OPAD buffer\n");
 			goto init_failed;
 		}
 
-		dev_dbg(dev, "Allocated authkey buffer in context ctx->authkey=@%p\n",
-			hmac->ipad_opad);
+		SSI_LOG_DEBUG("Allocated authkey buffer in context ctx->authkey=@%p\n",
+			      hmac->ipad_opad);
 
 		hmac->padded_authkey = dma_alloc_coherent(dev,
 							  MAX_HMAC_BLOCK_SIZE,
@@ -210,7 +209,7 @@ static int ssi_aead_init(struct crypto_aead *tfm)
 							  GFP_KERNEL);
 
 		if (!hmac->padded_authkey) {
-			dev_err(dev, "failed to allocate padded_authkey\n");
+			SSI_LOG_ERR("failed to allocate padded_authkey\n");
 			goto init_failed;
 		}
 	} else {
@@ -241,7 +240,8 @@ static void ssi_aead_complete(struct device *dev, void *ssi_req, void __iomem *c
 	if (areq_ctx->gen_ctx.op_type == DRV_CRYPTO_DIRECTION_DECRYPT) {
 		if (memcmp(areq_ctx->mac_buf, areq_ctx->icv_virt_addr,
 			   ctx->authsize) != 0) {
-			dev_dbg(dev, "Payload authentication failure, (auth-size=%d, cipher=%d)\n",
+			SSI_LOG_DEBUG("Payload authentication failure, "
+				"(auth-size=%d, cipher=%d).\n",
 				ctx->authsize, ctx->cipher_mode);
 			/* In case of payload authentication failure, MUST NOT
 			 * revealed the decrypted message --> zero its memory.
@@ -252,11 +252,8 @@ static void ssi_aead_complete(struct device *dev, void *ssi_req, void __iomem *c
 	} else { /*ENCRYPT*/
 		if (unlikely(areq_ctx->is_icv_fragmented))
 			ssi_buffer_mgr_copy_scatterlist_portion(
-				dev, areq_ctx->mac_buf, areq_ctx->dst_sgl,
-				areq->cryptlen + areq_ctx->dst_offset,
-				(areq->cryptlen + areq_ctx->dst_offset +
-				 ctx->authsize),
-				SSI_SG_FROM_BUF);
+				areq_ctx->mac_buf, areq_ctx->dst_sgl, areq->cryptlen + areq_ctx->dst_offset,
+				areq->cryptlen + areq_ctx->dst_offset + ctx->authsize, SSI_SG_FROM_BUF);
 
 		/* If an IV was generated, copy it back to the user provided buffer. */
 		if (areq_ctx->backup_giv) {
@@ -380,10 +377,8 @@ static int hmac_setkey(struct cc_hw_desc *desc, struct ssi_aead_ctx *ctx)
 
 static int validate_keys_sizes(struct ssi_aead_ctx *ctx)
 {
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
-
-	dev_dbg(dev, "enc_keylen=%u  authkeylen=%u\n",
-		ctx->enc_keylen, ctx->auth_keylen);
+	SSI_LOG_DEBUG("enc_keylen=%u  authkeylen=%u\n",
+		      ctx->enc_keylen, ctx->auth_keylen);
 
 	switch (ctx->auth_mode) {
 	case DRV_HASH_SHA1:
@@ -400,22 +395,22 @@ static int validate_keys_sizes(struct ssi_aead_ctx *ctx)
 			return -EINVAL;
 		break;
 	default:
-		dev_err(dev, "Invalid auth_mode=%d\n", ctx->auth_mode);
+		SSI_LOG_ERR("Invalid auth_mode=%d\n", ctx->auth_mode);
 		return -EINVAL;
 	}
 	/* Check cipher key size */
 	if (unlikely(ctx->flow_mode == S_DIN_to_DES)) {
 		if (ctx->enc_keylen != DES3_EDE_KEY_SIZE) {
-			dev_err(dev, "Invalid cipher(3DES) key size: %u\n",
-				ctx->enc_keylen);
+			SSI_LOG_ERR("Invalid cipher(3DES) key size: %u\n",
+				    ctx->enc_keylen);
 			return -EINVAL;
 		}
 	} else { /* Default assumed to be AES ciphers */
 		if ((ctx->enc_keylen != AES_KEYSIZE_128) &&
 		    (ctx->enc_keylen != AES_KEYSIZE_192) &&
 		    (ctx->enc_keylen != AES_KEYSIZE_256)) {
-			dev_err(dev, "Invalid cipher(AES) key size: %u\n",
-				ctx->enc_keylen);
+			SSI_LOG_ERR("Invalid cipher(AES) key size: %u\n",
+				    ctx->enc_keylen);
 			return -EINVAL;
 		}
 	}
@@ -431,7 +426,7 @@ ssi_get_plain_hmac_key(struct crypto_aead *tfm, const u8 *key, unsigned int keyl
 {
 	dma_addr_t key_dma_addr = 0;
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
+	struct device *dev = &ctx->drvdata->plat_dev->dev;
 	u32 larval_addr = ssi_ahash_get_larval_digest_sram_addr(
 					ctx->drvdata, ctx->auth_mode);
 	struct ssi_crypto_req ssi_req = {};
@@ -460,8 +455,8 @@ ssi_get_plain_hmac_key(struct crypto_aead *tfm, const u8 *key, unsigned int keyl
 	if (likely(keylen != 0)) {
 		key_dma_addr = dma_map_single(dev, (void *)key, keylen, DMA_TO_DEVICE);
 		if (unlikely(dma_mapping_error(dev, key_dma_addr))) {
-			dev_err(dev, "Mapping key va=0x%p len=%u for DMA failed\n",
-				key, keylen);
+			SSI_LOG_ERR("Mapping key va=0x%p len=%u for"
+				   " DMA failed\n", key, keylen);
 			return -ENOMEM;
 		}
 		if (keylen > blocksize) {
@@ -539,7 +534,7 @@ ssi_get_plain_hmac_key(struct crypto_aead *tfm, const u8 *key, unsigned int keyl
 
 	rc = send_request(ctx->drvdata, &ssi_req, desc, idx, 0);
 	if (unlikely(rc != 0))
-		dev_err(dev, "send_request() failed (rc=%d)\n", rc);
+		SSI_LOG_ERR("send_request() failed (rc=%d)\n", rc);
 
 	if (likely(key_dma_addr != 0))
 		dma_unmap_single(dev, key_dma_addr, keylen, DMA_TO_DEVICE);
@@ -556,10 +551,10 @@ ssi_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 	struct crypto_authenc_key_param *param;
 	struct cc_hw_desc desc[MAX_AEAD_SETKEY_SEQ];
 	int seq_len = 0, rc = -EINVAL;
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
-	dev_dbg(dev, "Setting key in context @%p for %s. key=%p keylen=%u\n",
-		ctx, crypto_tfm_alg_name(crypto_aead_tfm(tfm)), key, keylen);
+	SSI_LOG_DEBUG("Setting key in context @%p for %s. key=%p keylen=%u\n",
+		      ctx, crypto_tfm_alg_name(crypto_aead_tfm(tfm)),
+		      key, keylen);
 
 	/* STAT_PHASE_0: Init and sanity checks */
 
@@ -627,7 +622,7 @@ ssi_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 	case DRV_HASH_NULL: /* non-authenc modes, e.g., CCM */
 		break; /* No auth. key setup */
 	default:
-		dev_err(dev, "Unsupported authenc (%d)\n", ctx->auth_mode);
+		SSI_LOG_ERR("Unsupported authenc (%d)\n", ctx->auth_mode);
 		rc = -ENOTSUPP;
 		goto badkey;
 	}
@@ -637,7 +632,7 @@ ssi_aead_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 	if (seq_len > 0) { /* For CCM there is no sequence to setup the key */
 		rc = send_request(ctx->drvdata, &ssi_req, desc, seq_len, 0);
 		if (unlikely(rc != 0)) {
-			dev_err(dev, "send_request() failed (rc=%d)\n", rc);
+			SSI_LOG_ERR("send_request() failed (rc=%d)\n", rc);
 			goto setkey_error;
 		}
 	}
@@ -656,6 +651,7 @@ setkey_error:
 static int ssi_rfc4309_ccm_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 {
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
+	int rc = 0;
 
 	if (keylen < 3)
 		return -EINVAL;
@@ -663,7 +659,9 @@ static int ssi_rfc4309_ccm_setkey(struct crypto_aead *tfm, const u8 *key, unsign
 	keylen -= 3;
 	memcpy(ctx->ctr_nonce, key + keylen, 3);
 
-	return ssi_aead_setkey(tfm, key, keylen);
+	rc = ssi_aead_setkey(tfm, key, keylen);
+
+	return rc;
 }
 #endif /*SSI_CC_HAS_AES_CCM*/
 
@@ -672,7 +670,6 @@ static int ssi_aead_setauthsize(
 	unsigned int authsize)
 {
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(authenc);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	/* Unsupported auth. sizes */
 	if ((authsize == 0) ||
@@ -681,7 +678,7 @@ static int ssi_aead_setauthsize(
 	}
 
 	ctx->authsize = authsize;
-	dev_dbg(dev, "authlen=%d\n", ctx->authsize);
+	SSI_LOG_DEBUG("authlen=%d\n", ctx->authsize);
 
 	return 0;
 }
@@ -734,11 +731,10 @@ ssi_aead_create_assoc_desc(
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(areq);
 	enum ssi_req_dma_buf_type assoc_dma_type = areq_ctx->assoc_buff_type;
 	unsigned int idx = *seq_size;
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	switch (assoc_dma_type) {
 	case SSI_DMA_BUF_DLLI:
-		dev_dbg(dev, "ASSOC buffer type DLLI\n");
+		SSI_LOG_DEBUG("ASSOC buffer type DLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_DLLI, sg_dma_address(areq->src),
 			     areq->assoclen, NS_BIT); set_flow_mode(&desc[idx],
@@ -748,7 +744,7 @@ ssi_aead_create_assoc_desc(
 			set_din_not_last_indication(&desc[idx]);
 		break;
 	case SSI_DMA_BUF_MLLI:
-		dev_dbg(dev, "ASSOC buffer type MLLI\n");
+		SSI_LOG_DEBUG("ASSOC buffer type MLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_MLLI, areq_ctx->assoc.sram_addr,
 			     areq_ctx->assoc.mlli_nents, NS_BIT);
@@ -759,7 +755,7 @@ ssi_aead_create_assoc_desc(
 		break;
 	case SSI_DMA_BUF_NULL:
 	default:
-		dev_err(dev, "Invalid ASSOC buffer type\n");
+		SSI_LOG_ERR("Invalid ASSOC buffer type\n");
 	}
 
 	*seq_size = (++idx);
@@ -776,9 +772,6 @@ ssi_aead_process_authenc_data_desc(
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(areq);
 	enum ssi_req_dma_buf_type data_dma_type = areq_ctx->data_buff_type;
 	unsigned int idx = *seq_size;
-	struct crypto_aead *tfm = crypto_aead_reqtfm(areq);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	switch (data_dma_type) {
 	case SSI_DMA_BUF_DLLI:
@@ -790,7 +783,7 @@ ssi_aead_process_authenc_data_desc(
 		unsigned int offset =
 			(direct == DRV_CRYPTO_DIRECTION_ENCRYPT) ?
 			areq_ctx->dst_offset : areq_ctx->src_offset;
-		dev_dbg(dev, "AUTHENC: SRC/DST buffer type DLLI\n");
+		SSI_LOG_DEBUG("AUTHENC: SRC/DST buffer type DLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_DLLI,
 			     (sg_dma_address(cipher) + offset),
@@ -817,7 +810,7 @@ ssi_aead_process_authenc_data_desc(
 			}
 		}
 
-		dev_dbg(dev, "AUTHENC: SRC/DST buffer type MLLI\n");
+		SSI_LOG_DEBUG("AUTHENC: SRC/DST buffer type MLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_MLLI, mlli_addr, mlli_nents,
 			     NS_BIT);
@@ -826,7 +819,7 @@ ssi_aead_process_authenc_data_desc(
 	}
 	case SSI_DMA_BUF_NULL:
 	default:
-		dev_err(dev, "AUTHENC: Invalid SRC/DST buffer type\n");
+		SSI_LOG_ERR("AUTHENC: Invalid SRC/DST buffer type\n");
 	}
 
 	*seq_size = (++idx);
@@ -842,16 +835,13 @@ ssi_aead_process_cipher_data_desc(
 	unsigned int idx = *seq_size;
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(areq);
 	enum ssi_req_dma_buf_type data_dma_type = areq_ctx->data_buff_type;
-	struct crypto_aead *tfm = crypto_aead_reqtfm(areq);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	if (areq_ctx->cryptlen == 0)
 		return; /*null processing*/
 
 	switch (data_dma_type) {
 	case SSI_DMA_BUF_DLLI:
-		dev_dbg(dev, "CIPHER: SRC/DST buffer type DLLI\n");
+		SSI_LOG_DEBUG("CIPHER: SRC/DST buffer type DLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_DLLI,
 			     (sg_dma_address(areq_ctx->src_sgl) +
@@ -863,7 +853,7 @@ ssi_aead_process_cipher_data_desc(
 		set_flow_mode(&desc[idx], flow_mode);
 		break;
 	case SSI_DMA_BUF_MLLI:
-		dev_dbg(dev, "CIPHER: SRC/DST buffer type MLLI\n");
+		SSI_LOG_DEBUG("CIPHER: SRC/DST buffer type MLLI\n");
 		hw_desc_init(&desc[idx]);
 		set_din_type(&desc[idx], DMA_MLLI, areq_ctx->src.sram_addr,
 			     areq_ctx->src.mlli_nents, NS_BIT);
@@ -873,7 +863,7 @@ ssi_aead_process_cipher_data_desc(
 		break;
 	case SSI_DMA_BUF_NULL:
 	default:
-		dev_err(dev, "CIPHER: Invalid SRC/DST buffer type\n");
+		SSI_LOG_ERR("CIPHER: Invalid SRC/DST buffer type\n");
 	}
 
 	*seq_size = (++idx);
@@ -1188,15 +1178,14 @@ static inline void ssi_aead_load_mlli_to_sram(
 	struct aead_req_ctx *req_ctx = aead_request_ctx(req);
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	if (unlikely(
 		(req_ctx->assoc_buff_type == SSI_DMA_BUF_MLLI) ||
 		(req_ctx->data_buff_type == SSI_DMA_BUF_MLLI) ||
 		!req_ctx->is_single_pass)) {
-		dev_dbg(dev, "Copy-to-sram: mlli_dma=%08x, mlli_size=%u\n",
-			(unsigned int)ctx->drvdata->mlli_sram_addr,
-			req_ctx->mlli_params.mlli_len);
+		SSI_LOG_DEBUG("Copy-to-sram: mlli_dma=%08x, mlli_size=%u\n",
+			      (unsigned int)ctx->drvdata->mlli_sram_addr,
+			      req_ctx->mlli_params.mlli_len);
 		/* Copy MLLI table host-to-sram */
 		hw_desc_init(&desc[*seq_size]);
 		set_din_type(&desc[*seq_size], DMA_DLLI,
@@ -1344,7 +1333,6 @@ static int validate_data_size(struct ssi_aead_ctx *ctx,
 			      struct aead_request *req)
 {
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 	unsigned int assoclen = req->assoclen;
 	unsigned int cipherlen = (direct == DRV_CRYPTO_DIRECTION_DECRYPT) ?
 			(req->cryptlen - ctx->authsize) : req->cryptlen;
@@ -1383,7 +1371,7 @@ static int validate_data_size(struct ssi_aead_ctx *ctx,
 			areq_ctx->is_single_pass = false;
 		break;
 	default:
-		dev_err(dev, "Unexpected flow mode (%d)\n", ctx->flow_mode);
+		SSI_LOG_ERR("Unexpected flow mode (%d)\n", ctx->flow_mode);
 		goto data_size_err;
 	}
 
@@ -1566,7 +1554,6 @@ static int config_ccm_adata(struct aead_request *req)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 	struct aead_req_ctx *req_ctx = aead_request_ctx(req);
 	//unsigned int size_of_a = 0, rem_a_size = 0;
 	unsigned int lp = req->iv[0];
@@ -1588,7 +1575,7 @@ static int config_ccm_adata(struct aead_request *req)
 	/* taken from crypto/ccm.c */
 	/* 2 <= L <= 8, so 1 <= L' <= 7. */
 	if (l < 2 || l > 8) {
-		dev_err(dev, "illegal iv value %X\n", req->iv[0]);
+		SSI_LOG_ERR("illegal iv value %X\n", req->iv[0]);
 		return -EINVAL;
 	}
 	memcpy(b0, req->iv, AES_BLOCK_SIZE);
@@ -1601,10 +1588,8 @@ static int config_ccm_adata(struct aead_request *req)
 		*b0 |= 64;  /* Enable bit 6 if Adata exists. */
 
 	rc = set_msg_len(b0 + 16 - l, cryptlen, l);  /* Write L'. */
-	if (rc != 0) {
-		dev_err(dev, "message len overflow detected");
+	if (rc != 0)
 		return rc;
-	}
 	 /* END of "taken from crypto/ccm.c" */
 
 	/* l(a) - size of associated data. */
@@ -1827,6 +1812,7 @@ static inline int ssi_aead_gcm(
 	unsigned int *seq_size)
 {
 	struct aead_req_ctx *req_ctx = aead_request_ctx(req);
+	unsigned int idx = *seq_size;
 	unsigned int cipher_flow_mode;
 
 	if (req_ctx->gen_ctx.op_type == DRV_CRYPTO_DIRECTION_DECRYPT) {
@@ -1843,6 +1829,7 @@ static inline int ssi_aead_gcm(
 		ssi_aead_create_assoc_desc(req, DIN_HASH, desc, seq_size);
 		ssi_aead_gcm_setup_gctr_desc(req, desc, seq_size);
 		ssi_aead_process_gcm_result_desc(req, desc, seq_size);
+		idx = *seq_size;
 		return 0;
 	}
 
@@ -1857,6 +1844,7 @@ static inline int ssi_aead_gcm(
 		ssi_aead_process_cipher_data_desc(req, cipher_flow_mode, desc, seq_size);
 	ssi_aead_process_gcm_result_desc(req, desc, seq_size);
 
+	idx = *seq_size;
 	return 0;
 }
 
@@ -1873,13 +1861,13 @@ static inline void ssi_aead_dump_gcm(
 		return;
 
 	if (title) {
-		dev_dbg(dev, "----------------------------------------------------------------------------------");
-		dev_dbg(dev, "%s\n", title);
+		SSI_LOG_DEBUG("----------------------------------------------------------------------------------");
+		SSI_LOG_DEBUG("%s\n", title);
 	}
 
-	dev_dbg(dev, "cipher_mode %d, authsize %d, enc_keylen %d, assoclen %d, cryptlen %d\n",
-		ctx->cipher_mode, ctx->authsize, ctx->enc_keylen,
-		req->assoclen, req_ctx->cryptlen);
+	SSI_LOG_DEBUG("cipher_mode %d, authsize %d, enc_keylen %d, assoclen %d, cryptlen %d\n",
+		      ctx->cipher_mode, ctx->authsize, ctx->enc_keylen,
+		      req->assoclen, req_ctx->cryptlen);
 
 	if (ctx->enckey)
 		dump_byte_array("mac key", ctx->enckey, 16);
@@ -1909,7 +1897,6 @@ static int config_gcm_context(struct aead_request *req)
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
 	struct aead_req_ctx *req_ctx = aead_request_ctx(req);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 
 	unsigned int cryptlen = (req_ctx->gen_ctx.op_type ==
 				 DRV_CRYPTO_DIRECTION_ENCRYPT) ?
@@ -1917,8 +1904,7 @@ static int config_gcm_context(struct aead_request *req)
 				(req->cryptlen - ctx->authsize);
 	__be32 counter = cpu_to_be32(2);
 
-	dev_dbg(dev, "%s() cryptlen = %d, req->assoclen = %d ctx->authsize = %d\n",
-		__func__, cryptlen, req->assoclen, ctx->authsize);
+	SSI_LOG_DEBUG("%s() cryptlen = %d, req->assoclen = %d ctx->authsize = %d\n", __func__, cryptlen, req->assoclen, ctx->authsize);
 
 	memset(req_ctx->hkey, 0, AES_BLOCK_SIZE);
 
@@ -1972,20 +1958,20 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
+	struct device *dev = &ctx->drvdata->plat_dev->dev;
 	struct ssi_crypto_req ssi_req = {};
 
-	dev_dbg(dev, "%s context=%p req=%p iv=%p src=%p src_ofs=%d dst=%p dst_ofs=%d cryptolen=%d\n",
-		((direct == DRV_CRYPTO_DIRECTION_ENCRYPT) ? "Enc" : "Dec"),
-		ctx, req, req->iv, sg_virt(req->src), req->src->offset,
-		sg_virt(req->dst), req->dst->offset, req->cryptlen);
+	SSI_LOG_DEBUG("%s context=%p req=%p iv=%p src=%p src_ofs=%d dst=%p dst_ofs=%d cryptolen=%d\n",
+		      ((direct == DRV_CRYPTO_DIRECTION_ENCRYPT) ? "Encrypt" : "Decrypt"),
+		      ctx, req, req->iv, sg_virt(req->src), req->src->offset,
+		      sg_virt(req->dst), req->dst->offset, req->cryptlen);
 
 	/* STAT_PHASE_0: Init and sanity checks */
 
 	/* Check data length according to mode */
 	if (unlikely(validate_data_size(ctx, direct, req) != 0)) {
-		dev_err(dev, "Unsupported crypt/assoc len %d/%d.\n",
-			req->cryptlen, req->assoclen);
+		SSI_LOG_ERR("Unsupported crypt/assoc len %d/%d.\n",
+			    req->cryptlen, req->assoclen);
 		crypto_aead_set_flags(tfm, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
 		return -EINVAL;
 	}
@@ -2031,8 +2017,7 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 	if (ctx->cipher_mode == DRV_CIPHER_CCM) {
 		rc = config_ccm_adata(req);
 		if (unlikely(rc != 0)) {
-			dev_dbg(dev, "config_ccm_adata() returned with a failure %d!",
-				rc);
+			SSI_LOG_ERR("config_ccm_adata() returned with a failure %d!", rc);
 			goto exit;
 		}
 	} else {
@@ -2046,8 +2031,7 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 	if (ctx->cipher_mode == DRV_CIPHER_GCTR) {
 		rc = config_gcm_context(req);
 		if (unlikely(rc != 0)) {
-			dev_dbg(dev, "config_gcm_context() returned with a failure %d!",
-				rc);
+			SSI_LOG_ERR("config_gcm_context() returned with a failure %d!", rc);
 			goto exit;
 		}
 	}
@@ -2055,7 +2039,7 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 
 	rc = ssi_buffer_mgr_map_aead_request(ctx->drvdata, req);
 	if (unlikely(rc != 0)) {
-		dev_err(dev, "map_request() failed\n");
+		SSI_LOG_ERR("map_request() failed\n");
 		goto exit;
 	}
 
@@ -2111,7 +2095,7 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 			break;
 #endif
 	default:
-		dev_err(dev, "Unsupported authenc (%d)\n", ctx->auth_mode);
+		SSI_LOG_ERR("Unsupported authenc (%d)\n", ctx->auth_mode);
 		ssi_buffer_mgr_unmap_aead_request(dev, req);
 		rc = -ENOTSUPP;
 		goto exit;
@@ -2122,7 +2106,7 @@ static int ssi_aead_process(struct aead_request *req, enum drv_crypto_direction 
 	rc = send_request(ctx->drvdata, &ssi_req, desc, seq_len, 1);
 
 	if (unlikely(rc != -EINPROGRESS)) {
-		dev_err(dev, "send_request() failed (rc=%d)\n", rc);
+		SSI_LOG_ERR("send_request() failed (rc=%d)\n", rc);
 		ssi_buffer_mgr_unmap_aead_request(dev, req);
 	}
 
@@ -2155,13 +2139,10 @@ static int ssi_rfc4309_ccm_encrypt(struct aead_request *req)
 	/* Very similar to ssi_aead_encrypt() above. */
 
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 	int rc = -EINVAL;
 
 	if (!valid_assoclen(req)) {
-		dev_err(dev, "invalid Assoclen:%u\n", req->assoclen);
+		SSI_LOG_ERR("invalid Assoclen:%u\n", req->assoclen);
 		goto out;
 	}
 
@@ -2202,14 +2183,13 @@ static int ssi_aead_decrypt(struct aead_request *req)
 #if SSI_CC_HAS_AES_CCM
 static int ssi_rfc4309_ccm_decrypt(struct aead_request *req)
 {
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
+	/* Very similar to ssi_aead_decrypt() above. */
+
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
 	int rc = -EINVAL;
 
 	if (!valid_assoclen(req)) {
-		dev_err(dev, "invalid Assoclen:%u\n", req->assoclen);
+		SSI_LOG_ERR("invalid Assoclen:%u\n", req->assoclen);
 		goto out;
 	}
 
@@ -2234,9 +2214,9 @@ out:
 static int ssi_rfc4106_gcm_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 {
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
+	int rc = 0;
 
-	dev_dbg(dev, "%s()  keylen %d, key %p\n", __func__, keylen, key);
+	SSI_LOG_DEBUG("%s()  keylen %d, key %p\n", __func__, keylen, key);
 
 	if (keylen < 4)
 		return -EINVAL;
@@ -2244,15 +2224,17 @@ static int ssi_rfc4106_gcm_setkey(struct crypto_aead *tfm, const u8 *key, unsign
 	keylen -= 4;
 	memcpy(ctx->ctr_nonce, key + keylen, 4);
 
-	return ssi_aead_setkey(tfm, key, keylen);
+	rc = ssi_aead_setkey(tfm, key, keylen);
+
+	return rc;
 }
 
 static int ssi_rfc4543_gcm_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen)
 {
 	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
+	int rc = 0;
 
-	dev_dbg(dev, "%s()  keylen %d, key %p\n", __func__, keylen, key);
+	SSI_LOG_DEBUG("%s()  keylen %d, key %p\n", __func__, keylen, key);
 
 	if (keylen < 4)
 		return -EINVAL;
@@ -2260,7 +2242,9 @@ static int ssi_rfc4543_gcm_setkey(struct crypto_aead *tfm, const u8 *key, unsign
 	keylen -= 4;
 	memcpy(ctx->ctr_nonce, key + keylen, 4);
 
-	return ssi_aead_setkey(tfm, key, keylen);
+	rc = ssi_aead_setkey(tfm, key, keylen);
+
+	return rc;
 }
 
 static int ssi_gcm_setauthsize(struct crypto_aead *authenc,
@@ -2285,10 +2269,7 @@ static int ssi_gcm_setauthsize(struct crypto_aead *authenc,
 static int ssi_rfc4106_gcm_setauthsize(struct crypto_aead *authenc,
 				       unsigned int authsize)
 {
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(authenc);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
-
-	dev_dbg(dev, "authsize %d\n", authsize);
+	SSI_LOG_DEBUG("authsize %d\n", authsize);
 
 	switch (authsize) {
 	case 8:
@@ -2305,10 +2286,7 @@ static int ssi_rfc4106_gcm_setauthsize(struct crypto_aead *authenc,
 static int ssi_rfc4543_gcm_setauthsize(struct crypto_aead *authenc,
 				       unsigned int authsize)
 {
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(authenc);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
-
-	dev_dbg(dev, "authsize %d\n", authsize);
+	SSI_LOG_DEBUG("authsize %d\n", authsize);
 
 	if (authsize != 16)
 		return -EINVAL;
@@ -2320,14 +2298,11 @@ static int ssi_rfc4106_gcm_encrypt(struct aead_request *req)
 {
 	/* Very similar to ssi_aead_encrypt() above. */
 
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
 	int rc = -EINVAL;
 
 	if (!valid_assoclen(req)) {
-		dev_err(dev, "invalid Assoclen:%u\n", req->assoclen);
+		SSI_LOG_ERR("invalid Assoclen:%u\n", req->assoclen);
 		goto out;
 	}
 
@@ -2375,14 +2350,11 @@ static int ssi_rfc4106_gcm_decrypt(struct aead_request *req)
 {
 	/* Very similar to ssi_aead_decrypt() above. */
 
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct ssi_aead_ctx *ctx = crypto_aead_ctx(tfm);
-	struct device *dev = drvdata_to_dev(ctx->drvdata);
 	struct aead_req_ctx *areq_ctx = aead_request_ctx(req);
 	int rc = -EINVAL;
 
 	if (!valid_assoclen(req)) {
-		dev_err(dev, "invalid Assoclen:%u\n", req->assoclen);
+		SSI_LOG_ERR("invalid Assoclen:%u\n", req->assoclen);
 		goto out;
 	}
 
@@ -2682,17 +2654,16 @@ static struct ssi_alg_template aead_algs[] = {
 #endif /*SSI_CC_HAS_AES_GCM*/
 };
 
-static struct ssi_crypto_alg *ssi_aead_create_alg(
-			struct ssi_alg_template *template,
-			struct device *dev)
+static struct ssi_crypto_alg *ssi_aead_create_alg(struct ssi_alg_template *template)
 {
 	struct ssi_crypto_alg *t_alg;
 	struct aead_alg *alg;
 
 	t_alg = kzalloc(sizeof(*t_alg), GFP_KERNEL);
-	if (!t_alg)
+	if (!t_alg) {
+		SSI_LOG_ERR("failed to allocate t_alg\n");
 		return ERR_PTR(-ENOMEM);
-
+	}
 	alg = &template->template_aead;
 
 	snprintf(alg->base.cra_name, CRYPTO_MAX_ALG_NAME, "%s", template->name);
@@ -2742,7 +2713,6 @@ int ssi_aead_alloc(struct ssi_drvdata *drvdata)
 	struct ssi_crypto_alg *t_alg;
 	int rc = -ENOMEM;
 	int alg;
-	struct device *dev = drvdata_to_dev(drvdata);
 
 	aead_handle = kmalloc(sizeof(*aead_handle), GFP_KERNEL);
 	if (!aead_handle) {
@@ -2750,36 +2720,36 @@ int ssi_aead_alloc(struct ssi_drvdata *drvdata)
 		goto fail0;
 	}
 
-	INIT_LIST_HEAD(&aead_handle->aead_list);
 	drvdata->aead_handle = aead_handle;
 
 	aead_handle->sram_workspace_addr = ssi_sram_mgr_alloc(
 		drvdata, MAX_HMAC_DIGEST_SIZE);
 	if (aead_handle->sram_workspace_addr == NULL_SRAM_ADDR) {
-		dev_err(dev, "SRAM pool exhausted\n");
+		SSI_LOG_ERR("SRAM pool exhausted\n");
 		rc = -ENOMEM;
 		goto fail1;
 	}
 
+	INIT_LIST_HEAD(&aead_handle->aead_list);
+
 	/* Linux crypto */
 	for (alg = 0; alg < ARRAY_SIZE(aead_algs); alg++) {
-		t_alg = ssi_aead_create_alg(&aead_algs[alg], dev);
+		t_alg = ssi_aead_create_alg(&aead_algs[alg]);
 		if (IS_ERR(t_alg)) {
 			rc = PTR_ERR(t_alg);
-			dev_err(dev, "%s alg allocation failed\n",
-				aead_algs[alg].driver_name);
+			SSI_LOG_ERR("%s alg allocation failed\n",
+				    aead_algs[alg].driver_name);
 			goto fail1;
 		}
 		t_alg->drvdata = drvdata;
 		rc = crypto_register_aead(&t_alg->aead_alg);
 		if (unlikely(rc != 0)) {
-			dev_err(dev, "%s alg registration failed\n",
-				t_alg->aead_alg.base.cra_driver_name);
+			SSI_LOG_ERR("%s alg registration failed\n",
+				    t_alg->aead_alg.base.cra_driver_name);
 			goto fail2;
 		} else {
 			list_add_tail(&t_alg->entry, &aead_handle->aead_list);
-			dev_dbg(dev, "Registered %s\n",
-				t_alg->aead_alg.base.cra_driver_name);
+			SSI_LOG_DEBUG("Registered %s\n", t_alg->aead_alg.base.cra_driver_name);
 		}
 	}
 

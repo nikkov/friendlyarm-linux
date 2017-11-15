@@ -349,9 +349,9 @@ static int iss_net_poll(void)
 }
 
 
-static void iss_net_timer(struct timer_list *t)
+static void iss_net_timer(unsigned long priv)
 {
-	struct iss_net_private *lp = from_timer(lp, t, timer);
+	struct iss_net_private *lp = (struct iss_net_private *)priv;
 
 	iss_net_poll();
 	spin_lock(&lp->lock);
@@ -386,8 +386,10 @@ static int iss_net_open(struct net_device *dev)
 	spin_unlock_bh(&opened_lock);
 	spin_lock_bh(&lp->lock);
 
-	timer_setup(&lp->timer, iss_net_timer, 0);
+	init_timer(&lp->timer);
 	lp->timer_val = ISS_NET_TIMER_VALUE;
+	lp->timer.data = (unsigned long) lp;
+	lp->timer.function = iss_net_timer;
 	mod_timer(&lp->timer, jiffies + lp->timer_val);
 
 out:
@@ -480,7 +482,7 @@ static int iss_net_change_mtu(struct net_device *dev, int new_mtu)
 	return -EINVAL;
 }
 
-void iss_net_user_timer_expire(struct timer_list *unused)
+void iss_net_user_timer_expire(unsigned long _conn)
 {
 }
 
@@ -580,7 +582,8 @@ static int iss_net_configure(int index, char *init)
 		return 1;
 	}
 
-	timer_setup(&lp->tl, iss_net_user_timer_expire, 0);
+	init_timer(&lp->tl);
+	lp->tl.function = iss_net_user_timer_expire;
 
 	return 0;
 

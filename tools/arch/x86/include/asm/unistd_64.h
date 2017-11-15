@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NR_perf_event_open
 # define __NR_perf_event_open 298
 #endif

@@ -879,9 +879,9 @@ static int ata_eh_nr_in_flight(struct ata_port *ap)
 	return nr;
 }
 
-void ata_eh_fastdrain_timerfn(struct timer_list *t)
+void ata_eh_fastdrain_timerfn(unsigned long arg)
 {
-	struct ata_port *ap = from_timer(ap, t, fastdrain_timer);
+	struct ata_port *ap = (void *)arg;
 	unsigned long flags;
 	int cnt;
 

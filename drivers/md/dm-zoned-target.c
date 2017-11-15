@@ -660,7 +660,6 @@ static int dmz_get_zoned_device(struct dm_target *ti, char *path)
 	struct dmz_target *dmz = ti->private;
 	struct request_queue *q;
 	struct dmz_dev *dev;
-	sector_t aligned_capacity;
 	int ret;
 
 	/* Get the target device */
@@ -686,17 +685,15 @@ static int dmz_get_zoned_device(struct dm_target *ti, char *path)
 		goto err;
 	}
 
-	q = bdev_get_queue(dev->bdev);
 	dev->capacity = i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT;
-	aligned_capacity = dev->capacity & ~(blk_queue_zone_sectors(q) - 1);
-	if (ti->begin ||
-	    ((ti->len != dev->capacity) && (ti->len != aligned_capacity))) {
+	if (ti->begin || (ti->len != dev->capacity)) {
 		ti->error = "Partial mapping not supported";
 		ret = -EINVAL;
 		goto err;
 	}
 
-	dev->zone_nr_sectors = blk_queue_zone_sectors(q);
+	q = bdev_get_queue(dev->bdev);
+	dev->zone_nr_sectors = q->limits.chunk_sectors;
 	dev->zone_nr_sectors_shift = ilog2(dev->zone_nr_sectors);
 
 	dev->zone_nr_blocks = dmz_sect2blk(dev->zone_nr_sectors);
@@ -932,10 +929,8 @@ static int dmz_iterate_devices(struct dm_target *ti,
 			       iterate_devices_callout_fn fn, void *data)
 {
 	struct dmz_target *dmz = ti->private;
-	struct dmz_dev *dev = dmz->dev;
-	sector_t capacity = dev->capacity & ~(dev->zone_nr_sectors - 1);
 
-	return fn(ti, dmz->ddev, 0, capacity, data);
+	return fn(ti, dmz->ddev, 0, dmz->dev->capacity, data);
 }
 
 static struct target_type dmz_type = {

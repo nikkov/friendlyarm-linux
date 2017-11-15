@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _AV7110_H_
 #define _AV7110_H_
 
@@ -94,7 +93,7 @@ struct infrared {
 	u8			inversion;
 	u16			last_key;
 	u16			last_toggle;
-	bool			keypressed;
+	u8			delay_timer_finished;
 };
 
 

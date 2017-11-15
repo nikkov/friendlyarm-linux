@@ -137,7 +137,6 @@ struct csio_mbm {
 	uint32_t		a_mbox;			/* Async mbox num */
 	uint32_t		intr_idx;		/* Interrupt index */
 	struct timer_list	timer;			/* Mbox timer */
-	struct csio_hw		*hw;			/* Hardware pointer */
 	struct list_head	req_q;			/* Mbox request queue */
 	struct list_head	cbfn_q;			/* Mbox completion q */
 	struct csio_mb		*mcurrent;		/* Current mailbox */
@@ -253,7 +252,7 @@ void csio_mb_process_portparams_rsp(struct csio_hw *hw, struct csio_mb *mbp,
 
 /* MB module functions */
 int csio_mbm_init(struct csio_mbm *, struct csio_hw *,
-			    void (*)(struct timer_list *));
+			    void (*)(uintptr_t));
 void csio_mbm_exit(struct csio_mbm *);
 void csio_mb_intr_enable(struct csio_hw *);
 void csio_mb_intr_disable(struct csio_hw *);

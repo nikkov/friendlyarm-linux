@@ -101,8 +101,7 @@ typedef const struct acpi_exdump_info {
  */
 acpi_status
 acpi_ex_convert_to_integer(union acpi_operand_object *obj_desc,
-			   union acpi_operand_object **result_desc,
-			   u32 implicit_conversion);
+			   union acpi_operand_object **result_desc, u32 flags);
 
 acpi_status
 acpi_ex_convert_to_buffer(union acpi_operand_object *obj_desc,
@@ -424,6 +423,9 @@ acpi_ex_store_object_to_node(union acpi_operand_object *source_desc,
 			     struct acpi_namespace_node *node,
 			     struct acpi_walk_state *walk_state,
 			     u8 implicit_conversion);
+
+#define ACPI_IMPLICIT_CONVERSION        TRUE
+#define ACPI_NO_IMPLICIT_CONVERSION     FALSE
 
 /*
  * exstoren - resolve/store object

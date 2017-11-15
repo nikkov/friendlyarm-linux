@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_COMPAT_H
 #define _ASM_X86_COMPAT_H
 
@@ -7,7 +6,6 @@
  */
 #include <linux/types.h>
 #include <linux/sched.h>
-#include <linux/sched/task_stack.h>
 #include <asm/processor.h>
 #include <asm/user32.h>
 #include <asm/unistd.h>

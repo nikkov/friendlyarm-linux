@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/file.h>
 #include <linux/mount.h>
 #include <linux/namei.h>

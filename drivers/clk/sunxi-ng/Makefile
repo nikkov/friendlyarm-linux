@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
 # Common objects
 lib-$(CONFIG_SUNXI_CCU)		+= ccu_common.o
 lib-$(CONFIG_SUNXI_CCU)		+= ccu_mmc_timing.o

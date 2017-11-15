@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * builtin-test.c
  *
  * Builtin regression testing command: ever growing number of sanity tests
  */
-#include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>

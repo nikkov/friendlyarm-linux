@@ -528,20 +528,18 @@ void TsInitDelBA(struct rtllib_device *ieee,
 	}
 }
 
-void BaSetupTimeOut(struct timer_list *t)
+void BaSetupTimeOut(unsigned long data)
 {
-	struct tx_ts_record *pTxTs = from_timer(pTxTs, t,
-					      TxPendingBARecord.Timer);
+	struct tx_ts_record *pTxTs = (struct tx_ts_record *)data;
 
 	pTxTs->bAddBaReqInProgress = false;
 	pTxTs->bAddBaReqDelayed = true;
 	pTxTs->TxPendingBARecord.bValid = false;
 }
 
-void TxBaInactTimeout(struct timer_list *t)
+void TxBaInactTimeout(unsigned long data)
 {
-	struct tx_ts_record *pTxTs = from_timer(pTxTs, t,
-					      TxAdmittedBARecord.Timer);
+	struct tx_ts_record *pTxTs = (struct tx_ts_record *)data;
 	struct rtllib_device *ieee = container_of(pTxTs, struct rtllib_device,
 				     TxTsRecord[pTxTs->num]);
 	TxTsDeleteBA(ieee, pTxTs);
@@ -550,10 +548,9 @@ void TxBaInactTimeout(struct timer_list *t)
 			  DELBA_REASON_TIMEOUT);
 }
 
-void RxBaInactTimeout(struct timer_list *t)
+void RxBaInactTimeout(unsigned long data)
 {
-	struct rx_ts_record *pRxTs = from_timer(pRxTs, t,
-					      RxAdmittedBARecord.Timer);
+	struct rx_ts_record *pRxTs = (struct rx_ts_record *)data;
 	struct rtllib_device *ieee = container_of(pRxTs, struct rtllib_device,
 				     RxTsRecord[pRxTs->num]);
 

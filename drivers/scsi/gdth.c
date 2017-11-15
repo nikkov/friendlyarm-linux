@@ -3705,7 +3705,7 @@ static void gdth_log_event(gdth_evt_data *dvr, char *buffer)
 #ifdef GDTH_STATISTICS
 static u8	gdth_timer_running;
 
-static void gdth_timeout(struct timer_list *unused)
+static void gdth_timeout(unsigned long data)
 {
     u32 i;
     Scsi_Cmnd *nscp;
@@ -3743,6 +3743,8 @@ static void gdth_timer_init(void)
 	gdth_timer_running = 1;
 	TRACE2(("gdth_detect(): Initializing timer !\n"));
 	gdth_timer.expires = jiffies + HZ;
+	gdth_timer.data = 0L;
+	gdth_timer.function = gdth_timeout;
 	add_timer(&gdth_timer);
 }
 #else
@@ -5163,7 +5165,7 @@ static int __init gdth_init(void)
 	/* initializations */
 	gdth_polling = TRUE;
 	gdth_clear_events();
-	timer_setup(&gdth_timer, gdth_timeout, 0);
+	init_timer(&gdth_timer);
 
 	/* As default we do not probe for EISA or ISA controllers */
 	if (probe_eisa_isa) {

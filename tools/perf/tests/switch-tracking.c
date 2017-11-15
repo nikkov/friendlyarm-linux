@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <sys/time.h>
 #include <sys/prctl.h>
 #include <errno.h>

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "sched.h"
 
 #include <linux/proc_fs.h>

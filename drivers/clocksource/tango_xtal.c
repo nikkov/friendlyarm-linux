@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/clocksource.h>
 #include <linux/sched_clock.h>
 #include <linux/of_address.h>

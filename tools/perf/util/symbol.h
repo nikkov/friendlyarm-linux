@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PERF_SYMBOL
 #define __PERF_SYMBOL 1
 
@@ -60,7 +59,6 @@ struct symbol {
 	u8		binding;
 	u8		idle:1;
 	u8		ignore:1;
-	u8		inlined:1;
 	u8		arch_sym;
 	char		name[0];
 };
@@ -210,7 +208,6 @@ struct addr_location {
 	struct thread *thread;
 	struct map    *map;
 	struct symbol *sym;
-	const char    *srcline;
 	u64	      addr;
 	char	      level;
 	u8	      filtered;

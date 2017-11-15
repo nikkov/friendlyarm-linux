@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * I/O delay strategies for inb_p/outb_p
  *

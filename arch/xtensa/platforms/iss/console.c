@@ -47,14 +47,15 @@ static char *serial_name = "ISS serial driver";
  * initialization for the tty structure.
  */
 
-static void rs_poll(struct timer_list *);
+static void rs_poll(unsigned long);
 
 static int rs_open(struct tty_struct *tty, struct file * filp)
 {
 	tty->port = &serial_port;
 	spin_lock_bh(&timer_lock);
 	if (tty->count == 1) {
-		timer_setup(&serial_timer, rs_poll, 0);
+		setup_timer(&serial_timer, rs_poll,
+				(unsigned long)&serial_port);
 		mod_timer(&serial_timer, jiffies + SERIAL_TIMER_VALUE);
 	}
 	spin_unlock_bh(&timer_lock);
@@ -91,9 +92,9 @@ static int rs_write(struct tty_struct * tty,
 	return count;
 }
 
-static void rs_poll(struct timer_list *unused)
+static void rs_poll(unsigned long priv)
 {
-	struct tty_port *port = &serial_port;
+	struct tty_port *port = (struct tty_port *)priv;
 	int i = 0;
 	int rd = 1;
 	unsigned char c;

@@ -1070,6 +1070,13 @@ static const struct attribute_group elants_attribute_group = {
 	.attrs = elants_attributes,
 };
 
+static void elants_i2c_remove_sysfs_group(void *_data)
+{
+	struct elants_data *ts = _data;
+
+	sysfs_remove_group(&ts->client->dev.kobj, &elants_attribute_group);
+}
+
 static int elants_i2c_power_on(struct elants_data *ts)
 {
 	int error;
@@ -1282,9 +1289,19 @@ static int elants_i2c_probe(struct i2c_client *client,
 	if (!client->dev.of_node)
 		device_init_wakeup(&client->dev, true);
 
-	error = devm_device_add_group(&client->dev, &elants_attribute_group);
+	error = sysfs_create_group(&client->dev.kobj, &elants_attribute_group);
 	if (error) {
 		dev_err(&client->dev, "failed to create sysfs attributes: %d\n",
+			error);
+		return error;
+	}
+
+	error = devm_add_action(&client->dev,
+				elants_i2c_remove_sysfs_group, ts);
+	if (error) {
+		elants_i2c_remove_sysfs_group(ts);
+		dev_err(&client->dev,
+			"Failed to add sysfs cleanup action: %d\n",
 			error);
 		return error;
 	}

@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef PARSE_CTX_H
 #define PARSE_CTX_H 1
 

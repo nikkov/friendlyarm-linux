@@ -96,11 +96,9 @@ unsigned long pblk_rl_nr_free_blks(struct pblk_rl *rl)
  *
  * Only the total number of free blocks is used to configure the rate limiter.
  */
-void pblk_rl_update_rates(struct pblk_rl *rl)
+static int pblk_rl_update_rates(struct pblk_rl *rl, unsigned long max)
 {
-	struct pblk *pblk = container_of(rl, struct pblk, rl);
 	unsigned long free_blocks = pblk_rl_nr_free_blks(rl);
-	int max = rl->rb_budget;
 
 	if (free_blocks >= rl->high) {
 		rl->rb_user_max = max;
@@ -126,18 +124,23 @@ void pblk_rl_update_rates(struct pblk_rl *rl)
 		rl->rb_state = PBLK_RL_LOW;
 	}
 
-	if (rl->rb_state == (PBLK_RL_MID | PBLK_RL_LOW))
-		pblk_gc_should_start(pblk);
-	else
-		pblk_gc_should_stop(pblk);
+	return rl->rb_state;
 }
 
 void pblk_rl_free_lines_inc(struct pblk_rl *rl, struct pblk_line *line)
 {
+	struct pblk *pblk = container_of(rl, struct pblk, rl);
 	int blk_in_line = atomic_read(&line->blk_in_line);
+	int ret;
 
 	atomic_add(blk_in_line, &rl->free_blocks);
-	pblk_rl_update_rates(rl);
+	/* Rates will not change that often - no need to lock update */
+	ret = pblk_rl_update_rates(rl, rl->rb_budget);
+
+	if (ret == (PBLK_RL_MID | PBLK_RL_LOW))
+		pblk_gc_should_start(pblk);
+	else
+		pblk_gc_should_stop(pblk);
 }
 
 void pblk_rl_free_lines_dec(struct pblk_rl *rl, struct pblk_line *line)
@@ -145,7 +148,19 @@ void pblk_rl_free_lines_dec(struct pblk_rl *rl, struct pblk_line *line)
 	int blk_in_line = atomic_read(&line->blk_in_line);
 
 	atomic_sub(blk_in_line, &rl->free_blocks);
-	pblk_rl_update_rates(rl);
+}
+
+void pblk_gc_should_kick(struct pblk *pblk)
+{
+	struct pblk_rl *rl = &pblk->rl;
+	int ret;
+
+	/* Rates will not change that often - no need to lock update */
+	ret = pblk_rl_update_rates(rl, rl->rb_budget);
+	if (ret == (PBLK_RL_MID | PBLK_RL_LOW))
+		pblk_gc_should_start(pblk);
+	else
+		pblk_gc_should_stop(pblk);
 }
 
 int pblk_rl_high_thrs(struct pblk_rl *rl)
@@ -153,9 +168,14 @@ int pblk_rl_high_thrs(struct pblk_rl *rl)
 	return rl->high;
 }
 
-int pblk_rl_max_io(struct pblk_rl *rl)
+int pblk_rl_low_thrs(struct pblk_rl *rl)
 {
-	return rl->rb_max_io;
+	return rl->low;
+}
+
+int pblk_rl_sysfs_rate_show(struct pblk_rl *rl)
+{
+	return rl->rb_user_max;
 }
 
 static void pblk_rl_u_timer(unsigned long data)
@@ -194,7 +214,6 @@ void pblk_rl_init(struct pblk_rl *rl, int budget)
 	/* To start with, all buffer is available to user I/O writers */
 	rl->rb_budget = budget;
 	rl->rb_user_max = budget;
-	rl->rb_max_io = budget >> 1;
 	rl->rb_gc_max = 0;
 	rl->rb_state = PBLK_RL_HIGH;
 

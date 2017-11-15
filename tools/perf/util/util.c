@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include "../perf.h"
 #include "util.h"
 #include "debug.h"
@@ -7,7 +6,6 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
@@ -24,19 +22,6 @@
 /*
  * XXX We need to find a better place for these things...
  */
-
-bool perf_singlethreaded = true;
-
-void perf_set_singlethreaded(void)
-{
-	perf_singlethreaded = true;
-}
-
-void perf_set_multithreaded(void)
-{
-	perf_singlethreaded = false;
-}
-
 unsigned int page_size;
 int cacheline_size;
 
@@ -189,7 +174,7 @@ out:
 	return err;
 }
 
-static int copyfile_offset(int ifd, loff_t off_in, int ofd, loff_t off_out, u64 size)
+int copyfile_offset(int ifd, loff_t off_in, int ofd, loff_t off_out, u64 size)
 {
 	void *ptr;
 	loff_t pgoff;

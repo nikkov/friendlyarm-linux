@@ -18,8 +18,7 @@ Description:
 		Writing one of the above strings to this file causes the system
 		to transition into the corresponding state, if available.
 
-		See Documentation/admin-guide/pm/sleep-states.rst for more
-		information.
+		See Documentation/power/states.txt for more information.
 
 What:		/sys/power/mem_sleep
 Date:		November 2016
@@ -36,8 +35,7 @@ Description:
 		represented by it to be used on subsequent attempts to suspend
 		the system.
 
-		See Documentation/admin-guide/pm/sleep-states.rst for more
-		information.
+		See Documentation/power/states.txt for more information.
 
 What:		/sys/power/disk
 Date:		September 2006

@@ -2072,9 +2072,9 @@ static void artpec6_crypto_process_queue(struct artpec6_crypto *ac)
 		del_timer(&ac->timer);
 }
 
-static void artpec6_crypto_timeout(struct timer_list *t)
+static void artpec6_crypto_timeout(unsigned long data)
 {
-	struct artpec6_crypto *ac = from_timer(ac, t, timer);
+	struct artpec6_crypto *ac = (struct artpec6_crypto *) data;
 
 	dev_info_ratelimited(artpec6_crypto_dev, "timeout\n");
 
@@ -3063,7 +3063,7 @@ static int artpec6_crypto_probe(struct platform_device *pdev)
 	spin_lock_init(&ac->queue_lock);
 	INIT_LIST_HEAD(&ac->queue);
 	INIT_LIST_HEAD(&ac->pending);
-	timer_setup(&ac->timer, artpec6_crypto_timeout, 0);
+	setup_timer(&ac->timer, artpec6_crypto_timeout, (unsigned long) ac);
 
 	ac->base = base;
 

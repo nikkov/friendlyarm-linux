@@ -273,7 +273,7 @@ xfs_reflink_reserve_cow(
 	struct xfs_bmbt_irec	got;
 	int			error = 0;
 	bool			eof = false, trimmed;
-	struct xfs_iext_cursor	icur;
+	xfs_extnum_t		idx;
 
 	/*
 	 * Search the COW fork extent list first.  This serves two purposes:
@@ -284,7 +284,7 @@ xfs_reflink_reserve_cow(
 	 * tree.
 	 */
 
-	if (!xfs_iext_lookup_extent(ip, ifp, imap->br_startoff, &icur, &got))
+	if (!xfs_iext_lookup_extent(ip, ifp, imap->br_startoff, &idx, &got))
 		eof = true;
 	if (!eof && got.br_startoff <= imap->br_startoff) {
 		trace_xfs_reflink_cow_found(ip, imap);
@@ -312,7 +312,7 @@ xfs_reflink_reserve_cow(
 		return error;
 
 	error = xfs_bmapi_reserve_delalloc(ip, XFS_COW_FORK, imap->br_startoff,
-			imap->br_blockcount, 0, &got, &icur, eof);
+			imap->br_blockcount, 0, &got, &idx, eof);
 	if (error == -ENOSPC || error == -EDQUOT)
 		trace_xfs_reflink_cow_enospc(ip, imap);
 	if (error)
@@ -353,22 +353,29 @@ xfs_reflink_convert_cow(
 	xfs_off_t		offset,
 	xfs_off_t		count)
 {
+	struct xfs_bmbt_irec	got;
+	struct xfs_defer_ops	dfops;
 	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_ifork	*ifp = XFS_IFORK_PTR(ip, XFS_COW_FORK);
 	xfs_fileoff_t		offset_fsb = XFS_B_TO_FSBT(mp, offset);
 	xfs_fileoff_t		end_fsb = XFS_B_TO_FSB(mp, offset + count);
-	xfs_filblks_t		count_fsb = end_fsb - offset_fsb;
-	struct xfs_bmbt_irec	imap;
-	struct xfs_defer_ops	dfops;
-	xfs_fsblock_t		first_block = NULLFSBLOCK;
-	int			nimaps = 1, error = 0;
-
-	ASSERT(count != 0);
+	xfs_extnum_t		idx;
+	bool			found;
+	int			error = 0;
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	error = xfs_bmapi_write(NULL, ip, offset_fsb, count_fsb,
-			XFS_BMAPI_COWFORK | XFS_BMAPI_CONVERT |
-			XFS_BMAPI_CONVERT_ONLY, &first_block, 0, &imap, &nimaps,
-			&dfops);
+
+	/* Convert all the extents to real from unwritten. */
+	for (found = xfs_iext_lookup_extent(ip, ifp, offset_fsb, &idx, &got);
+	     found && got.br_startoff < end_fsb;
+	     found = xfs_iext_get_extent(ifp, ++idx, &got)) {
+		error = xfs_reflink_convert_cow_extent(ip, &got, offset_fsb,
+				end_fsb - offset_fsb, &dfops);
+		if (error)
+			break;
+	}
+
+	/* Finish up. */
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	return error;
 }
@@ -392,7 +399,7 @@ xfs_reflink_allocate_cow(
 	bool			trimmed;
 	xfs_filblks_t		resaligned;
 	xfs_extlen_t		resblks = 0;
-	struct xfs_iext_cursor	icur;
+	xfs_extnum_t		idx;
 
 retry:
 	ASSERT(xfs_is_reflink_inode(ip));
@@ -402,7 +409,7 @@ retry:
 	 * Even if the extent is not shared we might have a preallocation for
 	 * it in the COW fork.  If so use it.
 	 */
-	if (xfs_iext_lookup_extent(ip, ip->i_cowfp, offset_fsb, &icur, &got) &&
+	if (xfs_iext_lookup_extent(ip, ip->i_cowfp, offset_fsb, &idx, &got) &&
 	    got.br_startoff <= offset_fsb) {
 		*shared = true;
 
@@ -489,13 +496,13 @@ xfs_reflink_find_cow_mapping(
 	struct xfs_ifork		*ifp = XFS_IFORK_PTR(ip, XFS_COW_FORK);
 	xfs_fileoff_t			offset_fsb;
 	struct xfs_bmbt_irec		got;
-	struct xfs_iext_cursor		icur;
+	xfs_extnum_t			idx;
 
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
 	ASSERT(xfs_is_reflink_inode(ip));
 
 	offset_fsb = XFS_B_TO_FSBT(ip->i_mount, offset);
-	if (!xfs_iext_lookup_extent(ip, ifp, offset_fsb, &icur, &got))
+	if (!xfs_iext_lookup_extent(ip, ifp, offset_fsb, &idx, &got))
 		return false;
 	if (got.br_startoff > offset_fsb)
 		return false;
@@ -517,18 +524,18 @@ xfs_reflink_trim_irec_to_next_cow(
 {
 	struct xfs_ifork		*ifp = XFS_IFORK_PTR(ip, XFS_COW_FORK);
 	struct xfs_bmbt_irec		got;
-	struct xfs_iext_cursor		icur;
+	xfs_extnum_t			idx;
 
 	if (!xfs_is_reflink_inode(ip))
 		return;
 
 	/* Find the extent in the CoW fork. */
-	if (!xfs_iext_lookup_extent(ip, ifp, offset_fsb, &icur, &got))
+	if (!xfs_iext_lookup_extent(ip, ifp, offset_fsb, &idx, &got))
 		return;
 
 	/* This is the extent before; try sliding up one. */
 	if (got.br_startoff < offset_fsb) {
-		if (!xfs_iext_next_extent(ifp, &icur, &got))
+		if (!xfs_iext_get_extent(ifp, idx + 1, &got))
 			return;
 	}
 
@@ -555,32 +562,24 @@ xfs_reflink_cancel_cow_blocks(
 {
 	struct xfs_ifork		*ifp = XFS_IFORK_PTR(ip, XFS_COW_FORK);
 	struct xfs_bmbt_irec		got, del;
-	struct xfs_iext_cursor		icur;
+	xfs_extnum_t			idx;
 	xfs_fsblock_t			firstfsb;
 	struct xfs_defer_ops		dfops;
 	int				error = 0;
 
 	if (!xfs_is_reflink_inode(ip))
 		return 0;
-	if (!xfs_iext_lookup_extent_before(ip, ifp, &end_fsb, &icur, &got))
+	if (!xfs_iext_lookup_extent(ip, ifp, offset_fsb, &idx, &got))
 		return 0;
 
-	/* Walk backwards until we're out of the I/O range... */
-	while (got.br_startoff + got.br_blockcount > offset_fsb) {
+	while (got.br_startoff < end_fsb) {
 		del = got;
 		xfs_trim_extent(&del, offset_fsb, end_fsb - offset_fsb);
-
-		/* Extent delete may have bumped ext forward */
-		if (!del.br_blockcount) {
-			xfs_iext_prev(ifp, &icur);
-			goto next_extent;
-		}
-
 		trace_xfs_reflink_cancel_cow(ip, &del);
 
 		if (isnullstartblock(del.br_startblock)) {
 			error = xfs_bmap_del_extent_delay(ip, XFS_COW_FORK,
-					&icur, &got, &del);
+					&idx, &got, &del);
 			if (error)
 				break;
 		} else if (del.br_state == XFS_EXT_UNWRITTEN || cancel_real) {
@@ -611,10 +610,10 @@ xfs_reflink_cancel_cow_blocks(
 			}
 
 			/* Remove the mapping from the CoW fork. */
-			xfs_bmap_del_extent_cow(ip, &icur, &got, &del);
+			xfs_bmap_del_extent_cow(ip, &idx, &got, &del);
 		}
-next_extent:
-		if (!xfs_iext_get_extent(ifp, &icur, &got))
+
+		if (!xfs_iext_get_extent(ifp, ++idx, &got))
 			break;
 	}
 
@@ -699,7 +698,7 @@ xfs_reflink_end_cow(
 	int				error;
 	unsigned int			resblks;
 	xfs_filblks_t			rlen;
-	struct xfs_iext_cursor		icur;
+	xfs_extnum_t			idx;
 
 	trace_xfs_reflink_end_cow(ip, offset, count);
 
@@ -734,22 +733,27 @@ xfs_reflink_end_cow(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, 0);
 
-	/*
-	 * In case of racing, overlapping AIO writes no COW extents might be
-	 * left by the time I/O completes for the loser of the race.  In that
-	 * case we are done.
-	 */
-	if (!xfs_iext_lookup_extent_before(ip, ifp, &end_fsb, &icur, &got))
-		goto out_cancel;
+	/* If there is a hole at end_fsb - 1 go to the previous extent */
+	if (!xfs_iext_lookup_extent(ip, ifp, end_fsb - 1, &idx, &got) ||
+	    got.br_startoff > end_fsb) {
+		/*
+		 * In case of racing, overlapping AIO writes no COW extents
+		 * might be left by the time I/O completes for the loser of
+		 * the race.  In that case we are done.
+		 */
+		if (idx <= 0)
+			goto out_cancel;
+		xfs_iext_get_extent(ifp, --idx, &got);
+	}
 
 	/* Walk backwards until we're out of the I/O range... */
 	while (got.br_startoff + got.br_blockcount > offset_fsb) {
 		del = got;
 		xfs_trim_extent(&del, offset_fsb, end_fsb - offset_fsb);
 
-		/* Extent delete may have bumped ext forward */
+		/* Extent delete may have bumped idx forward */
 		if (!del.br_blockcount) {
-			xfs_iext_prev(ifp, &icur);
+			idx--;
 			goto next_extent;
 		}
 
@@ -761,7 +765,7 @@ xfs_reflink_end_cow(
 		 * allocated but have not yet been involved in a write.
 		 */
 		if (got.br_state == XFS_EXT_UNWRITTEN) {
-			xfs_iext_prev(ifp, &icur);
+			idx--;
 			goto next_extent;
 		}
 
@@ -792,14 +796,14 @@ xfs_reflink_end_cow(
 			goto out_defer;
 
 		/* Remove the mapping from the CoW fork. */
-		xfs_bmap_del_extent_cow(ip, &icur, &got, &del);
+		xfs_bmap_del_extent_cow(ip, &idx, &got, &del);
 
 		xfs_defer_ijoin(&dfops, ip);
 		error = xfs_defer_finish(&tp, &dfops);
 		if (error)
 			goto out_defer;
 next_extent:
-		if (!xfs_iext_get_extent(ifp, &icur, &got))
+		if (!xfs_iext_get_extent(ifp, idx, &got))
 			break;
 	}
 
@@ -1429,7 +1433,7 @@ xfs_reflink_inode_has_shared_extents(
 	xfs_extlen_t			aglen;
 	xfs_agblock_t			rbno;
 	xfs_extlen_t			rlen;
-	struct xfs_iext_cursor		icur;
+	xfs_extnum_t			idx;
 	bool				found;
 	int				error;
 
@@ -1441,7 +1445,7 @@ xfs_reflink_inode_has_shared_extents(
 	}
 
 	*has_shared = false;
-	found = xfs_iext_lookup_extent(ip, ifp, 0, &icur, &got);
+	found = xfs_iext_lookup_extent(ip, ifp, 0, &idx, &got);
 	while (found) {
 		if (isnullstartblock(got.br_startblock) ||
 		    got.br_state != XFS_EXT_NORM)
@@ -1460,7 +1464,7 @@ xfs_reflink_inode_has_shared_extents(
 			return 0;
 		}
 next:
-		found = xfs_iext_next_extent(ifp, &icur, &got);
+		found = xfs_iext_get_extent(ifp, ++idx, &got);
 	}
 
 	return 0;

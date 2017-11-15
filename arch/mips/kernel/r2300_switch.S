@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * r2300_switch.S: R2300 specific task switching code.
  *

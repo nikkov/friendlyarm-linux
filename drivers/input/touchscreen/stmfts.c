@@ -725,7 +725,8 @@ static int stmfts_probe(struct i2c_client *client,
 		}
 	}
 
-	err = devm_device_add_group(&client->dev, &stmfts_attribute_group);
+	err = sysfs_create_group(&sdata->client->dev.kobj,
+				 &stmfts_attribute_group);
 	if (err)
 		return err;
 
@@ -737,6 +738,7 @@ static int stmfts_probe(struct i2c_client *client,
 static int stmfts_remove(struct i2c_client *client)
 {
 	pm_runtime_disable(&client->dev);
+	sysfs_remove_group(&client->dev.kobj, &stmfts_attribute_group);
 
 	return 0;
 }

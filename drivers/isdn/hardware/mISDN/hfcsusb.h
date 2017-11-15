@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * hfcsusb.h, HFC-S USB mISDN driver
  */

@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
-#include <linux/compiler.h>
-
 static struct ins_ops *powerpc__associate_instruction_ops(struct arch *arch, const char *name)
 {
 	int i;
@@ -49,7 +46,7 @@ static struct ins_ops *powerpc__associate_instruction_ops(struct arch *arch, con
 	return ops;
 }
 
-static int powerpc__annotate_init(struct arch *arch, char *cpuid __maybe_unused)
+static int powerpc__annotate_init(struct arch *arch)
 {
 	if (!arch->initialized) {
 		arch->initialized = true;

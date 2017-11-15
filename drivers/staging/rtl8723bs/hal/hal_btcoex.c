@@ -463,7 +463,7 @@ static u8 halbtcoutsrc_Get(void *pBtcContext, u8 getType, void *pOutBuf)
 		break;
 
 	case BTC_GET_BL_WIFI_UNDER_5G:
-		*pu8 = pHalData->CurrentBandType == 1;
+		*pu8 = (pHalData->CurrentBandType == 1) ? true : false;
 		break;
 
 	case BTC_GET_BL_WIFI_AP_MODE_ENABLE:
@@ -1411,8 +1411,15 @@ void hal_btcoex_SetSingleAntPath(struct adapter *padapter, u8 singleAntPath)
 
 u8 hal_btcoex_Initialize(struct adapter *padapter)
 {
+	u8 ret1;
+	u8 ret2;
+
+
 	memset(&GLBtCoexist, 0, sizeof(GLBtCoexist));
-	return EXhalbtcoutsrc_InitlizeVariables((void *)padapter);
+	ret1 = EXhalbtcoutsrc_InitlizeVariables((void *)padapter);
+	ret2 = (ret1 == true) ? true : false;
+
+	return ret2;
 }
 
 void hal_btcoex_PowerOnSetting(struct adapter *padapter)

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -79,7 +78,7 @@ void mnt_pin_kill(struct mount *m)
 	while (1) {
 		struct hlist_node *p;
 		rcu_read_lock();
-		p = READ_ONCE(m->mnt_pins.first);
+		p = ACCESS_ONCE(m->mnt_pins.first);
 		if (!p) {
 			rcu_read_unlock();
 			break;
@@ -93,7 +92,7 @@ void group_pin_kill(struct hlist_head *p)
 	while (1) {
 		struct hlist_node *q;
 		rcu_read_lock();
-		q = READ_ONCE(p->first);
+		q = ACCESS_ONCE(p->first);
 		if (!q) {
 			rcu_read_unlock();
 			break;

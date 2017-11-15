@@ -136,7 +136,8 @@ static void crypto_cts_encrypt_done(struct crypto_async_request *areq, int err)
 		goto out;
 
 	err = cts_cbc_encrypt(req);
-	if (err == -EINPROGRESS || err == -EBUSY)
+	if (err == -EINPROGRESS ||
+	    (err == -EBUSY && req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
 		return;
 
 out:
@@ -228,7 +229,8 @@ static void crypto_cts_decrypt_done(struct crypto_async_request *areq, int err)
 		goto out;
 
 	err = cts_cbc_decrypt(req);
-	if (err == -EINPROGRESS || err == -EBUSY)
+	if (err == -EINPROGRESS ||
+	    (err == -EBUSY && req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
 		return;
 
 out:

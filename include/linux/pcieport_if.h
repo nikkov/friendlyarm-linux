@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * File:	pcieport_if.h
  * Purpose:	PCI Express Port Bus Driver's IF Data Structure
