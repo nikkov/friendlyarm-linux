@@ -925,20 +925,8 @@ static void dummy_udc_set_speed(struct usb_gadget *_gadget,
 	struct dummy	*dum;
 
 	dum = gadget_dev_to_dummy(&_gadget->dev);
-
-	 if (mod_data.is_super_speed)
-		 dum->gadget.speed = min_t(u8, USB_SPEED_SUPER, speed);
-	 else if (mod_data.is_high_speed)
-		 dum->gadget.speed = min_t(u8, USB_SPEED_HIGH, speed);
-	 else
-		 dum->gadget.speed = USB_SPEED_FULL;
-
+	dum->gadget.speed = speed;
 	dummy_udc_update_ep0(dum);
-
-	if (dum->gadget.speed < speed)
-		dev_dbg(udc_dev(dum), "This device can perform faster"
-			" if you connect it to a %s port...\n",
-			usb_speed_string(speed));
 }
 
 static int dummy_udc_start(struct usb_gadget *g,
@@ -1771,9 +1759,9 @@ static int handle_control_request(struct dummy_hcd *dum_hcd, struct urb *urb,
 /* drive both sides of the transfers; looks like irq handlers to
  * both drivers except the callbacks aren't in_irq().
  */
-static void dummy_timer(unsigned long _dum_hcd)
+static void dummy_timer(struct timer_list *t)
 {
-	struct dummy_hcd	*dum_hcd = (struct dummy_hcd *) _dum_hcd;
+	struct dummy_hcd	*dum_hcd = from_timer(dum_hcd, t, timer);
 	struct dummy		*dum = dum_hcd->dum;
 	struct urbp		*urbp, *tmp;
 	unsigned long		flags;
@@ -2193,8 +2181,6 @@ static int dummy_hub_control(
 							USB_PORT_STAT_LOW_SPEED;
 						break;
 					default:
-						dum_hcd->dum->gadget.speed =
-							USB_SPEED_FULL;
 						break;
 					}
 				}
@@ -2445,7 +2431,7 @@ static DEVICE_ATTR_RO(urbs);
 
 static int dummy_start_ss(struct dummy_hcd *dum_hcd)
 {
-	setup_timer(&dum_hcd->timer, dummy_timer, (unsigned long)dum_hcd);
+	timer_setup(&dum_hcd->timer, dummy_timer, 0);
 	dum_hcd->rh_state = DUMMY_RH_RUNNING;
 	dum_hcd->stream_en_ep = 0;
 	INIT_LIST_HEAD(&dum_hcd->urbp_list);
@@ -2474,7 +2460,7 @@ static int dummy_start(struct usb_hcd *hcd)
 		return dummy_start_ss(dum_hcd);
 
 	spin_lock_init(&dum_hcd->dum->lock);
-	setup_timer(&dum_hcd->timer, dummy_timer, (unsigned long)dum_hcd);
+	timer_setup(&dum_hcd->timer, dummy_timer, 0);
 	dum_hcd->rh_state = DUMMY_RH_RUNNING;
 
 	INIT_LIST_HEAD(&dum_hcd->urbp_list);

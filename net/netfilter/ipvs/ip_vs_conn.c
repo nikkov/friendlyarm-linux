@@ -185,7 +185,7 @@ static inline int ip_vs_conn_hash(struct ip_vs_conn *cp)
 		hlist_add_head_rcu(&cp->c_list, &ip_vs_conn_tab[hash]);
 		ret = 1;
 	} else {
-		pr_err("%s(): request for already hashed, called from %pF\n",
+		pr_err("%s(): request for already hashed, called from %pS\n",
 		       __func__, __builtin_return_address(0));
 		ret = 0;
 	}
@@ -322,7 +322,7 @@ ip_vs_conn_fill_param_proto(struct netns_ipvs *ipvs,
 {
 	__be16 _ports[2], *pptr;
 
-	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports, iph);
+	pptr = frag_safe_skb_hp(skb, iph->len, sizeof(_ports), _ports);
 	if (pptr == NULL)
 		return 1;
 
@@ -1143,7 +1143,6 @@ static int ip_vs_conn_open(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations ip_vs_conn_fops = {
-	.owner	 = THIS_MODULE,
 	.open    = ip_vs_conn_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
@@ -1221,7 +1220,6 @@ static int ip_vs_conn_sync_open(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations ip_vs_conn_sync_fops = {
-	.owner	 = THIS_MODULE,
 	.open    = ip_vs_conn_sync_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,

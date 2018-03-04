@@ -1092,8 +1092,7 @@ static int ql_get_next_chunk(struct ql_adapter *qdev, struct rx_ring *rx_ring,
 {
 	if (!rx_ring->pg_chunk.page) {
 		u64 map;
-		rx_ring->pg_chunk.page = alloc_pages(__GFP_COLD | __GFP_COMP |
-						GFP_ATOMIC,
+		rx_ring->pg_chunk.page = alloc_pages(__GFP_COMP | GFP_ATOMIC,
 						qdev->lbq_buf_order);
 		if (unlikely(!rx_ring->pg_chunk.page)) {
 			netif_err(qdev, drv, qdev->ndev,
@@ -1748,8 +1747,7 @@ static void ql_realign_skb(struct sk_buff *skb, int len)
 	 */
 	skb->data -= QLGE_SB_PAD - NET_IP_ALIGN;
 	skb->tail -= QLGE_SB_PAD - NET_IP_ALIGN;
-	skb_copy_to_linear_data(skb, temp_addr,
-		(unsigned int)len);
+	memmove(skb->data, temp_addr, len);
 }
 
 /*

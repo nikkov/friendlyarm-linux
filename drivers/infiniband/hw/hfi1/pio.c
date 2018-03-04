@@ -455,8 +455,8 @@ int init_send_contexts(struct hfi1_devdata *dd)
 	dd->hw_to_sw = kmalloc_array(TXE_NUM_CONTEXTS, sizeof(u8),
 					GFP_KERNEL);
 	dd->send_contexts = kcalloc(dd->num_send_contexts,
-					sizeof(struct send_context_info),
-					GFP_KERNEL);
+				    sizeof(struct send_context_info),
+				    GFP_KERNEL);
 	if (!dd->send_contexts || !dd->hw_to_sw) {
 		kfree(dd->hw_to_sw);
 		kfree(dd->send_contexts);
@@ -703,7 +703,6 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 {
 	struct send_context_info *sci;
 	struct send_context *sc = NULL;
-	int req_type = type;
 	dma_addr_t dma;
 	unsigned long flags;
 	u64 reg;
@@ -730,13 +729,6 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 		return NULL;
 	}
 
-	/*
-	 * VNIC contexts are dynamically allocated.
-	 * Hence, pick a user context for VNIC.
-	 */
-	if (type == SC_VNIC)
-		type = SC_USER;
-
 	spin_lock_irqsave(&dd->sc_lock, flags);
 	ret = sc_hw_alloc(dd, type, &sw_index, &hw_context);
 	if (ret) {
@@ -744,15 +736,6 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 		free_percpu(sc->buffers_allocated);
 		kfree(sc);
 		return NULL;
-	}
-
-	/*
-	 * VNIC contexts are used by kernel driver.
-	 * Hence, mark them as kernel contexts.
-	 */
-	if (req_type == SC_VNIC) {
-		dd->send_contexts[sw_index].type = SC_KERNEL;
-		type = SC_KERNEL;
 	}
 
 	sci = &dd->send_contexts[sw_index];
@@ -873,8 +856,9 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 		 * so head == tail can mean empty.
 		 */
 		sc->sr_size = sci->credits + 1;
-		sc->sr = kzalloc_node(sizeof(union pio_shadow_ring) *
-				sc->sr_size, GFP_KERNEL, numa);
+		sc->sr = kcalloc_node(sc->sr_size,
+				      sizeof(union pio_shadow_ring),
+				      GFP_KERNEL, numa);
 		if (!sc->sr) {
 			sc_free(sc);
 			return NULL;
@@ -1975,9 +1959,9 @@ int init_pervl_scs(struct hfi1_devdata *dd)
 	hfi1_init_ctxt(dd->vld[15].sc);
 	dd->vld[15].mtu = enum_to_mtu(OPA_MTU_2048);
 
-	dd->kernel_send_context = kzalloc_node(dd->num_send_contexts *
-					sizeof(struct send_context *),
-					GFP_KERNEL, dd->node);
+	dd->kernel_send_context = kcalloc_node(dd->num_send_contexts,
+					       sizeof(struct send_context *),
+					       GFP_KERNEL, dd->node);
 	if (!dd->kernel_send_context)
 		goto freesc15;
 

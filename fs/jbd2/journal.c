@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/fs/jbd2/journal.c
  *
  * Written by Stephen C. Tweedie <sct@redhat.com>, 1998
  *
  * Copyright 1998 Red Hat corp --- All Rights Reserved
- *
- * This file is part of the Linux kernel and is made available under
- * the terms of the GNU General Public License, version 2, or at your
- * option, any later version, incorporated herein by reference.
  *
  * Generic filesystem journal-writing code; part of the ext2fs
  * journaling system.
@@ -736,6 +733,23 @@ int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
 		err = -EIO;
 	return err;
 }
+
+/* Return 1 when transaction with given tid has already committed. */
+int jbd2_transaction_committed(journal_t *journal, tid_t tid)
+{
+	int ret = 1;
+
+	read_lock(&journal->j_state_lock);
+	if (journal->j_running_transaction &&
+	    journal->j_running_transaction->t_tid == tid)
+		ret = 0;
+	if (journal->j_committing_transaction &&
+	    journal->j_committing_transaction->t_tid == tid)
+		ret = 0;
+	read_unlock(&journal->j_state_lock);
+	return ret;
+}
+EXPORT_SYMBOL(jbd2_transaction_committed);
 
 /*
  * When this function returns the transaction corresponding to tid

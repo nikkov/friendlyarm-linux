@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 #ifndef _LINUX_OF_H
 #define _LINUX_OF_H
 /*
@@ -9,11 +10,6 @@
  * Updates for PPC64 by Peter Bergner & David Engebretsen, IBM Corp.
  * Updates for SPARC64 by David S. Miller
  * Derived from PowerPC and Sparc prom.h files by Stephen Rothwell, IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/types.h>
 #include <linux/bitops.h>
@@ -544,6 +540,8 @@ const char *of_prop_next_string(struct property *prop, const char *cur);
 
 bool of_console_check(struct device_node *dn, char *name, int index);
 
+extern int of_cpu_node_to_id(struct device_node *np);
+
 #else /* CONFIG_OF */
 
 static inline void of_core_init(void)
@@ -681,12 +679,6 @@ static inline int of_property_count_elems_of_size(const struct device_node *np,
 	return -ENOSYS;
 }
 
-static inline int of_property_read_u32_index(const struct device_node *np,
-			const char *propname, u32 index, u32 *out_value)
-{
-	return -ENOSYS;
-}
-
 static inline int of_property_read_u8_array(const struct device_node *np,
 			const char *propname, u8 *out_values, size_t sz)
 {
@@ -713,16 +705,14 @@ static inline int of_property_read_u64_array(const struct device_node *np,
 	return -ENOSYS;
 }
 
-static inline int of_property_read_string(const struct device_node *np,
-					  const char *propname,
-					  const char **out_string)
+static inline int of_property_read_u32_index(const struct device_node *np,
+			const char *propname, u32 index, u32 *out_value)
 {
 	return -ENOSYS;
 }
 
-static inline int of_property_read_string_helper(const struct device_node *np,
-						 const char *propname,
-						 const char **out_strs, size_t sz, int index)
+static inline int of_property_read_u64_index(const struct device_node *np,
+			const char *propname, u32 index, u64 *out_value)
 {
 	return -ENOSYS;
 }
@@ -750,8 +740,47 @@ static inline int of_n_size_cells(struct device_node *np)
 	return 0;
 }
 
+static inline int of_property_read_variable_u8_array(const struct device_node *np,
+					const char *propname, u8 *out_values,
+					size_t sz_min, size_t sz_max)
+{
+	return -ENOSYS;
+}
+
+static inline int of_property_read_variable_u16_array(const struct device_node *np,
+					const char *propname, u16 *out_values,
+					size_t sz_min, size_t sz_max)
+{
+	return -ENOSYS;
+}
+
+static inline int of_property_read_variable_u32_array(const struct device_node *np,
+					const char *propname,
+					u32 *out_values,
+					size_t sz_min,
+					size_t sz_max)
+{
+	return -ENOSYS;
+}
+
 static inline int of_property_read_u64(const struct device_node *np,
 				       const char *propname, u64 *out_value)
+{
+	return -ENOSYS;
+}
+
+static inline int of_property_read_variable_u64_array(const struct device_node *np,
+					const char *propname,
+					u64 *out_values,
+					size_t sz_min,
+					size_t sz_max)
+{
+	return -ENOSYS;
+}
+
+static inline int of_property_read_string(const struct device_node *np,
+					  const char *propname,
+					  const char **out_string)
 {
 	return -ENOSYS;
 }
@@ -759,6 +788,13 @@ static inline int of_property_read_u64(const struct device_node *np,
 static inline int of_property_match_string(const struct device_node *np,
 					   const char *propname,
 					   const char *string)
+{
+	return -ENOSYS;
+}
+
+static inline int of_property_read_string_helper(const struct device_node *np,
+						 const char *propname,
+						 const char **out_strs, size_t sz, int index)
 {
 	return -ENOSYS;
 }
@@ -876,6 +912,11 @@ static inline void of_property_set_flag(struct property *p, unsigned long flag)
 
 static inline void of_property_clear_flag(struct property *p, unsigned long flag)
 {
+}
+
+static inline int of_cpu_node_to_id(struct device_node *np)
+{
+	return -ENODEV;
 }
 
 #define of_match_ptr(_ptr)	NULL

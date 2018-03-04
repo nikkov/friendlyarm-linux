@@ -198,7 +198,7 @@ static void moxa_hangup(struct tty_struct *);
 static int moxa_tiocmget(struct tty_struct *tty);
 static int moxa_tiocmset(struct tty_struct *tty,
 			 unsigned int set, unsigned int clear);
-static void moxa_poll(unsigned long);
+static void moxa_poll(struct timer_list *);
 static void moxa_set_tty_param(struct tty_struct *, struct ktermios *);
 static void moxa_shutdown(struct tty_port *);
 static int moxa_carrier_raised(struct tty_port *);
@@ -1429,7 +1429,7 @@ put:
 	return 0;
 }
 
-static void moxa_poll(unsigned long ignored)
+static void moxa_poll(struct timer_list *unused)
 {
 	struct moxa_board_conf *brd;
 	u16 __iomem *ip;
@@ -1487,8 +1487,6 @@ static void moxa_set_tty_param(struct tty_struct *tty, struct ktermios *old_term
 	if (ts->c_iflag & IXANY)
 		xany = 1;
 
-	/* Clear the features we don't support */
-	ts->c_cflag &= ~CMSPAR;
 	MoxaPortFlowCtrl(ch, rts, cts, txflow, rxflow, xany);
 	baud = MoxaPortSetTermio(ch, ts, tty_get_baud_rate(tty));
 	if (baud == -1)
@@ -1781,10 +1779,17 @@ static int MoxaPortSetTermio(struct moxa_port *port, struct ktermios *termio,
 		mode |= MX_STOP1;
 
 	if (termio->c_cflag & PARENB) {
-		if (termio->c_cflag & PARODD)
-			mode |= MX_PARODD;
-		else
-			mode |= MX_PAREVEN;
+		if (termio->c_cflag & PARODD) {
+			if (termio->c_cflag & CMSPAR)
+				mode |= MX_PARMARK;
+			else
+				mode |= MX_PARODD;
+		} else {
+			if (termio->c_cflag & CMSPAR)
+				mode |= MX_PARSPACE;
+			else
+				mode |= MX_PAREVEN;
+		}
 	} else
 		mode |= MX_PARNONE;
 

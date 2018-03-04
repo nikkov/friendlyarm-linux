@@ -170,7 +170,7 @@ static struct pci_driver isicom_driver = {
 static int prev_card = 3;	/*	start servicing isi_card[0]	*/
 static struct tty_driver *isicom_normal;
 
-static void isicom_tx(unsigned long _data);
+static void isicom_tx(struct timer_list *unused);
 static void isicom_start(struct tty_struct *tty);
 
 static DEFINE_TIMER(tx, isicom_tx);
@@ -219,13 +219,9 @@ static struct isi_port  isi_ports[PORT_COUNT];
 static int WaitTillCardIsFree(unsigned long base)
 {
 	unsigned int count = 0;
-	unsigned int a = in_atomic(); /* do we run under spinlock? */
 
 	while (!(inw(base + 0xe) & 0x1) && count++ < 100)
-		if (a)
-			mdelay(1);
-		else
-			msleep(1);
+		mdelay(1);
 
 	return !(inw(base + 0xe) & 0x1);
 }
@@ -394,7 +390,7 @@ static inline int __isicom_paranoia_check(struct isi_port const *port,
  *	will do the rest of the work for us.
  */
 
-static void isicom_tx(unsigned long _data)
+static void isicom_tx(struct timer_list *unused)
 {
 	unsigned long flags, base;
 	unsigned int retries;

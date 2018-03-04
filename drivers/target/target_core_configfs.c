@@ -1197,6 +1197,7 @@ struct configfs_attribute *passthrough_attrib_attrs[] = {
 EXPORT_SYMBOL(passthrough_attrib_attrs);
 
 TB_CIT_SETUP_DRV(dev_attrib, NULL, NULL);
+TB_CIT_SETUP_DRV(dev_action, NULL, NULL);
 
 /* End functions for struct config_item_type tb_dev_attrib_cit */
 
@@ -1611,12 +1612,12 @@ static match_table_t tokens = {
 	{Opt_res_type, "res_type=%d"},
 	{Opt_res_scope, "res_scope=%d"},
 	{Opt_res_all_tg_pt, "res_all_tg_pt=%d"},
-	{Opt_mapped_lun, "mapped_lun=%lld"},
+	{Opt_mapped_lun, "mapped_lun=%u"},
 	{Opt_target_fabric, "target_fabric=%s"},
 	{Opt_target_node, "target_node=%s"},
 	{Opt_tpgt, "tpgt=%d"},
 	{Opt_port_rtpi, "port_rtpi=%d"},
-	{Opt_target_lun, "target_lun=%lld"},
+	{Opt_target_lun, "target_lun=%u"},
 	{Opt_err, NULL}
 };
 
@@ -1693,7 +1694,7 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 			}
 			break;
 		case Opt_sa_res_key:
-			ret = kstrtoull(args->from, 0, &tmp_ll);
+			ret = match_u64(args,  &tmp_ll);
 			if (ret < 0) {
 				pr_err("kstrtoull() failed for sa_res_key=\n");
 				goto out;
@@ -1727,10 +1728,10 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 			all_tg_pt = (int)arg;
 			break;
 		case Opt_mapped_lun:
-			ret = match_int(args, &arg);
+			ret = match_u64(args, &tmp_ll);
 			if (ret)
 				goto out;
-			mapped_lun = (u64)arg;
+			mapped_lun = (u64)tmp_ll;
 			break;
 		/*
 		 * PR APTPL Metadata for Target Port
@@ -1768,10 +1769,10 @@ static ssize_t target_pr_res_aptpl_metadata_store(struct config_item *item,
 				goto out;
 			break;
 		case Opt_target_lun:
-			ret = match_int(args, &arg);
+			ret = match_u64(args, &tmp_ll);
 			if (ret)
 				goto out;
-			target_lun = (u64)arg;
+			target_lun = (u64)tmp_ll;
 			break;
 		default:
 			break;
@@ -2940,6 +2941,10 @@ static struct config_group *target_core_make_subdev(
 
 	config_group_init_type_name(&dev->dev_group, name, &tb->tb_dev_cit);
 
+	config_group_init_type_name(&dev->dev_action_group, "action",
+			&tb->tb_dev_action_cit);
+	configfs_add_default_group(&dev->dev_action_group, &dev->dev_group);
+
 	config_group_init_type_name(&dev->dev_attrib.da_group, "attrib",
 			&tb->tb_dev_attrib_cit);
 	configfs_add_default_group(&dev->dev_attrib.da_group, &dev->dev_group);
@@ -3200,6 +3205,7 @@ static const struct config_item_type target_core_cit = {
 void target_setup_backend_cits(struct target_backend *tb)
 {
 	target_core_setup_dev_cit(tb);
+	target_core_setup_dev_action_cit(tb);
 	target_core_setup_dev_attrib_cit(tb);
 	target_core_setup_dev_pr_cit(tb);
 	target_core_setup_dev_wwn_cit(tb);

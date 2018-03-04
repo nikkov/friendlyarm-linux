@@ -1,15 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Arch specific cpu topology information
  *
  * Copyright (C) 2016, ARM Ltd.
  * Written by: Juri Lelli, ARM Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
- * Released under the GPLv2 only.
- * SPDX-License-Identifier: GPL-2.0
  */
 
 #include <linux/acpi.h>
@@ -105,7 +99,7 @@ subsys_initcall(register_cpu_capacity_sysctl);
 static u32 capacity_scale;
 static u32 *raw_capacity;
 
-static int __init free_raw_capacity(void)
+static int free_raw_capacity(void)
 {
 	kfree(raw_capacity);
 	raw_capacity = NULL;

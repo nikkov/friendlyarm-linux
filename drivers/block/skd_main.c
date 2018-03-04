@@ -32,7 +32,6 @@
 #include <linux/aer.h>
 #include <linux/wait.h>
 #include <linux/stringify.h>
-#include <linux/slab_def.h>
 #include <scsi/scsi.h>
 #include <scsi/sg.h>
 #include <linux/io.h>
@@ -707,9 +706,9 @@ static void skd_start_queue(struct work_struct *work)
 	blk_mq_start_hw_queues(skdev->queue);
 }
 
-static void skd_timer_tick(ulong arg)
+static void skd_timer_tick(struct timer_list *t)
 {
-	struct skd_device *skdev = (struct skd_device *)arg;
+	struct skd_device *skdev = from_timer(skdev, t, timer);
 	unsigned long reqflags;
 	u32 state;
 
@@ -857,7 +856,7 @@ static int skd_start_timer(struct skd_device *skdev)
 {
 	int rc;
 
-	setup_timer(&skdev->timer, skd_timer_tick, (ulong)skdev);
+	timer_setup(&skdev->timer, skd_timer_tick, 0);
 
 	rc = mod_timer(&skdev->timer, (jiffies + HZ));
 	if (rc)
@@ -2603,7 +2602,8 @@ static void *skd_alloc_dma(struct skd_device *skdev, struct kmem_cache *s,
 	buf = kmem_cache_alloc(s, gfp);
 	if (!buf)
 		return NULL;
-	*dma_handle = dma_map_single(dev, buf, s->size, dir);
+	*dma_handle = dma_map_single(dev, buf,
+				     kmem_cache_size(s), dir);
 	if (dma_mapping_error(dev, *dma_handle)) {
 		kmem_cache_free(s, buf);
 		buf = NULL;
@@ -2618,7 +2618,8 @@ static void skd_free_dma(struct skd_device *skdev, struct kmem_cache *s,
 	if (!vaddr)
 		return;
 
-	dma_unmap_single(&skdev->pdev->dev, dma_handle, s->size, dir);
+	dma_unmap_single(&skdev->pdev->dev, dma_handle,
+			 kmem_cache_size(s), dir);
 	kmem_cache_free(s, vaddr);
 }
 

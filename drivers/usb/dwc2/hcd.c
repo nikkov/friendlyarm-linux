@@ -659,6 +659,10 @@ static void dwc2_dump_channel_info(struct dwc2_hsotg *hsotg,
 	list_for_each_entry(qh, &hsotg->non_periodic_sched_inactive,
 			    qh_list_entry)
 		dev_dbg(hsotg->dev, "    %p\n", qh);
+	dev_dbg(hsotg->dev, "  NP waiting sched:\n");
+	list_for_each_entry(qh, &hsotg->non_periodic_sched_waiting,
+			    qh_list_entry)
+		dev_dbg(hsotg->dev, "    %p\n", qh);
 	dev_dbg(hsotg->dev, "  NP active sched:\n");
 	list_for_each_entry(qh, &hsotg->non_periodic_sched_active,
 			    qh_list_entry)
@@ -1818,6 +1822,7 @@ static void dwc2_qh_list_free(struct dwc2_hsotg *hsotg,
 static void dwc2_kill_all_urbs(struct dwc2_hsotg *hsotg)
 {
 	dwc2_kill_urbs_in_qh_list(hsotg, &hsotg->non_periodic_sched_inactive);
+	dwc2_kill_urbs_in_qh_list(hsotg, &hsotg->non_periodic_sched_waiting);
 	dwc2_kill_urbs_in_qh_list(hsotg, &hsotg->non_periodic_sched_active);
 	dwc2_kill_urbs_in_qh_list(hsotg, &hsotg->periodic_sched_inactive);
 	dwc2_kill_urbs_in_qh_list(hsotg, &hsotg->periodic_sched_ready);
@@ -3314,9 +3319,9 @@ host:
 	}
 }
 
-static void dwc2_wakeup_detected(unsigned long data)
+static void dwc2_wakeup_detected(struct timer_list *t)
 {
-	struct dwc2_hsotg *hsotg = (struct dwc2_hsotg *)data;
+	struct dwc2_hsotg *hsotg = from_timer(hsotg, t, wkp_timer);
 	u32 hprt0;
 
 	dev_dbg(hsotg->dev, "%s()\n", __func__);
@@ -4998,6 +5003,7 @@ static void dwc2_hcd_free(struct dwc2_hsotg *hsotg)
 
 	/* Free memory for QH/QTD lists */
 	dwc2_qh_list_free(hsotg, &hsotg->non_periodic_sched_inactive);
+	dwc2_qh_list_free(hsotg, &hsotg->non_periodic_sched_waiting);
 	dwc2_qh_list_free(hsotg, &hsotg->non_periodic_sched_active);
 	dwc2_qh_list_free(hsotg, &hsotg->periodic_sched_inactive);
 	dwc2_qh_list_free(hsotg, &hsotg->periodic_sched_ready);
@@ -5155,11 +5161,11 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg)
 	}
 	INIT_WORK(&hsotg->wf_otg, dwc2_conn_id_status_change);
 
-	setup_timer(&hsotg->wkp_timer, dwc2_wakeup_detected,
-		    (unsigned long)hsotg);
+	timer_setup(&hsotg->wkp_timer, dwc2_wakeup_detected, 0);
 
 	/* Initialize the non-periodic schedule */
 	INIT_LIST_HEAD(&hsotg->non_periodic_sched_inactive);
+	INIT_LIST_HEAD(&hsotg->non_periodic_sched_waiting);
 	INIT_LIST_HEAD(&hsotg->non_periodic_sched_active);
 
 	/* Initialize the periodic schedule */

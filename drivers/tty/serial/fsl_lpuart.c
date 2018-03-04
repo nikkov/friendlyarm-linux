@@ -966,9 +966,9 @@ static void lpuart_dma_rx_complete(void *arg)
 	lpuart_copy_rx_to_tty(sport);
 }
 
-static void lpuart_timer_func(unsigned long data)
+static void lpuart_timer_func(struct timer_list *t)
 {
-	struct lpuart_port *sport = (struct lpuart_port *)data;
+	struct lpuart_port *sport = from_timer(sport, t, lpuart_timer);
 
 	lpuart_copy_rx_to_tty(sport);
 }
@@ -1263,8 +1263,7 @@ static void lpuart32_setup_watermark(struct lpuart_port *sport)
 
 static void rx_dma_timer_init(struct lpuart_port *sport)
 {
-		setup_timer(&sport->lpuart_timer, lpuart_timer_func,
-				(unsigned long)sport);
+		timer_setup(&sport->lpuart_timer, lpuart_timer_func, 0);
 		sport->lpuart_timer.expires = jiffies + sport->dma_rx_timeout;
 		add_timer(&sport->lpuart_timer);
 }
@@ -2207,23 +2206,16 @@ static int lpuart_probe(struct platform_device *pdev)
 	if (ret)
 		goto failed_attach_port;
 
-	of_get_rs485_mode(np, &sport->port.rs485);
+	uart_get_rs485_mode(&pdev->dev, &sport->port.rs485);
 
-	if (sport->port.rs485.flags & SER_RS485_RX_DURING_TX) {
+	if (sport->port.rs485.flags & SER_RS485_RX_DURING_TX)
 		dev_err(&pdev->dev, "driver doesn't support RX during TX\n");
-		return -ENOSYS;
-	}
 
 	if (sport->port.rs485.delay_rts_before_send ||
-	    sport->port.rs485.delay_rts_after_send) {
+	    sport->port.rs485.delay_rts_after_send)
 		dev_err(&pdev->dev, "driver doesn't support RTS delays\n");
-		return -ENOSYS;
-	}
 
-	if (sport->port.rs485.flags & SER_RS485_ENABLED) {
-		sport->port.rs485.flags |= SER_RS485_RTS_ON_SEND;
-		writeb(UARTMODEM_TXRTSE, sport->port.membase + UARTMODEM);
-	}
+	lpuart_config_rs485(&sport->port, &sport->port.rs485);
 
 	sport->dma_tx_chan = dma_request_slave_channel(sport->port.dev, "tx");
 	if (!sport->dma_tx_chan)
