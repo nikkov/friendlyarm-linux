@@ -2585,12 +2585,14 @@ static int musb_bus_suspend(struct usb_hcd *hcd)
 	default:
 		break;
 	}
-
+	// FIX ME: try to avoid endless "trying to suspend..."
+#if 0
 	if (musb->is_active) {
 		WARNING("trying to suspend as %s while active\n",
 				usb_otg_state_string(musb->xceiv->otg->state));
 		return -EBUSY;
 	} else
+#endif
 		return 0;
 }
 

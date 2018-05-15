@@ -43,22 +43,13 @@
 #include "sun8i-h3-nanopi.dtsi"
 
 / {
-	model = "FriendlyArm NanoPi M1";
+	model = "FriendlyElec NanoPi-M1";
 	compatible = "friendlyarm,nanopi-m1", "allwinner,sun8i-h3";
 };
 
-&ehci1 {
-	status = "okay";
-};
-
-&ehci2 {
-	status = "okay";
-};
-
-&ohci1 {
-	status = "okay";
-};
-
-&ohci2 {
+&emac {
+	phy-handle = <&int_mii_phy>;
+	phy-mode = "mii";
+	allwinner,leds-active-low;
 	status = "okay";
 };

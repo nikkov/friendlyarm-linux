@@ -12,8 +12,11 @@ config ARCH_SUNXI
 	select GENERIC_IRQ_CHIP
 	select PINCTRL
 	select RESET_CONTROLLER
+	select PINCTRL_SUN50I_H5
+	select PINCTRL_SUN8I_H3_R
 	help
-	  This enables support for Allwinner sunxi based SoCs like the A64.
+	  This enables support for Allwinner sunxi based SoCs like the A64
+	  and H5.
 
 config ARCH_ALPINE
 	bool "Annapurna Labs Alpine platform"

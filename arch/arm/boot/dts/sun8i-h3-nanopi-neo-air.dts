@@ -40,57 +40,77 @@
  *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
-/dts-v1/;
-#include "sun8i-h3.dtsi"
-#include "sunxi-common-regulators.dtsi"
-
-#include <dt-bindings/gpio/gpio.h>
+#include "sun8i-h3-nanopi.dtsi"
 
 / {
-	model = "FriendlyARM NanoPi NEO Air";
+	model = "FriendlyElec NanoPi-NEO-Air";
 	compatible = "friendlyarm,nanopi-neo-air", "allwinner,sun8i-h3";
 
-	aliases {
-		serial0 = &uart0;
+	wifi_pwrseq: wifi_pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_en_npi>;
+		reset-gpios = <&r_pio 0 7 GPIO_ACTIVE_LOW>; /* PL7 */
+		post-power-on-delay-ms = <200>;
 	};
-
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
-	leds {
-		compatible = "gpio-leds";
-
-		pwr {
-			label = "nanopi:green:pwr";
-			gpios = <&r_pio 0 10 GPIO_ACTIVE_HIGH>; /* PL10 */
-			default-state = "on";
-		};
-
-		status {
-			label = "nanopi:blue:status";
-			gpios = <&pio 0 10 GPIO_ACTIVE_HIGH>; /* PA10 */
-		};
+	rfkill_bt {
+		compatible = "rfkill-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&bt_pwr_pin>;
+		reset-gpios = <&pio 6 13 GPIO_ACTIVE_HIGH>; /* PG13 */
+		clocks = <&osc32k>;
+		clock-frequency = <32768>;
+		rfkill-name = "sunxi-bt";
+		rfkill-type = "bluetooth";
 	};
 };
 
-&mmc0 {
+&pio {
+	bt_pwr_pin: bt_pwr_pin@0 {
+		pins = "PG13";
+		function = "gpio_out";
+	};
+};
+
+&r_pio {
+	wifi_en_npi: wifi_en_pin {
+		pins = "PL7";
+		function = "gpio_out";
+	};
+};
+
+&mmc1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin>;
+	pinctrl-0 = <&mmc1_pins_a>;
 	vmmc-supply = <&reg_vcc3v3>;
+	vqmmc-supply = <&reg_vcc3v3>;
+	mmc-pwrseq = <&wifi_pwrseq>;
 	bus-width = <4>;
-	cd-gpios = <&pio 5 6 GPIO_ACTIVE_HIGH>; /* PF6 */
-	cd-inverted;
+	non-removable;
 	status = "okay";
+
+	brcmf: bcrmf@1 {
+		reg = <1>;
+		compatible = "brcm,bcm4329-fmac";
+		interrupt-parent = <&pio>;
+		interrupts = <6 10 IRQ_TYPE_LEVEL_LOW>; /* PG10 / EINT10 */
+		interrupt-names = "host-wake";
+	};
 };
 
-&uart0 {
+&mmc2 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&uart0_pins_a>;
+	pinctrl-0 = <&mmc2_8bit_pins>;
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <8>;
+	non-removable;
+	cap-mmc-hw-reset;
 	status = "okay";
 };
 
-&usbphy {
-	/* USB VBUS is always on */
-	status = "okay";
+&mmc2_8bit_pins {
+	/* Increase drive strength for DDR modes */
+	drive-strength = <40>;
+	/* eMMC is missing pull-ups */
+	bias-pull-up;
 };

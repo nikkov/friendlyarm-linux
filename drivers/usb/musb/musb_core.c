@@ -717,24 +717,25 @@ static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
 			break;
 		}
 
-		dev_printk(ignore ? KERN_DEBUG : KERN_ERR, musb->controller,
-				"VBUS_ERROR in %s (%02x, %s), retry #%d, port1 %08x\n",
-				usb_otg_state_string(musb->xceiv->otg->state),
-				devctl,
-				({ char *s;
-				switch (devctl & MUSB_DEVCTL_VBUS) {
-				case 0 << MUSB_DEVCTL_VBUS_SHIFT:
-					s = "<SessEnd"; break;
-				case 1 << MUSB_DEVCTL_VBUS_SHIFT:
-					s = "<AValid"; break;
-				case 2 << MUSB_DEVCTL_VBUS_SHIFT:
-					s = "<VBusValid"; break;
-				/* case 3 << MUSB_DEVCTL_VBUS_SHIFT: */
-				default:
-					s = "VALID"; break;
-				} s; }),
-				VBUSERR_RETRY_COUNT - musb->vbuserr_retry,
-				musb->port1_status);
+		if (musb->xceiv->otg->state != OTG_STATE_B_IDLE && musb->xceiv->otg->state == OTG_STATE_A_IDLE)
+			dev_printk(ignore ? KERN_DEBUG : KERN_ERR, musb->controller,
+					"VBUS_ERROR in %s (%02x, %s), retry #%d, port1 %08x ignore=%d\n",
+					usb_otg_state_string(musb->xceiv->otg->state),
+					devctl,
+					({ char *s;
+					switch (devctl & MUSB_DEVCTL_VBUS) {
+					case 0 << MUSB_DEVCTL_VBUS_SHIFT:
+						s = "<SessEnd"; break;
+					case 1 << MUSB_DEVCTL_VBUS_SHIFT:
+						s = "<AValid"; break;
+					case 2 << MUSB_DEVCTL_VBUS_SHIFT:
+						s = "<VBusValid"; break;
+					/* case 3 << MUSB_DEVCTL_VBUS_SHIFT: */
+					default:
+						s = "VALID"; break;
+					} s; }),
+					VBUSERR_RETRY_COUNT - musb->vbuserr_retry,
+					musb->port1_status, ignore);
 
 		/* go through A_WAIT_VFALL then start a new session */
 		if (!ignore)

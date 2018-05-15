@@ -1653,9 +1653,17 @@ static int do_register_framebuffer(struct fb_info *fb_info)
 		return -ENXIO;
 
 	num_registered_fb++;
-	for (i = 0 ; i < FB_MAX; i++)
+	for (i = 0 ; i < FB_MAX; i++) {
+		// Reserve /dev/fb1 for fb-tft
+		if (! strcmp(fb_info->fix.id, "fb_st7789v")) {
+			i = 1;
+			break;
+		}
+		if (i == 1)
+			continue;
 		if (!registered_fb[i])
 			break;
+	}
 	fb_info->node = i;
 	atomic_set(&fb_info->count, 1);
 	mutex_init(&fb_info->lock);

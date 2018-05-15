@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Icenowy Zheng <icenowy@aosc.io>
+ * Copyright (C) 2016 ARM Ltd.
  *
  * This file is dual-licensed: you can use it either under the terms
  * of the GPL or the X11 license, at your option. Note that this dual
@@ -40,105 +40,102 @@
  *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
-/dts-v1/;
-#include "sun50i-h5.dtsi"
-
-#include <dt-bindings/gpio/gpio.h>
+#include "sun50i-h5-nanopi.dtsi"
 
 / {
-	model = "FriendlyARM NanoPi NEO 2";
-	compatible = "friendlyarm,nanopi-neo2", "allwinner,sun50i-h5";
+	model = "FriendlyElec NanoPi-NEO2";
+	compatible = "friendlyelec,nanopi-neo2", "allwinner,sun50i-h5";
 
-	aliases {
-		serial0 = &uart0;
+	vdd_cpux: gpio-regulator {
+		compatible = "regulator-gpio";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&vdd_cpux_r_npi>;
+
+		regulator-name = "vdd-cpux";
+		regulator-type = "voltage";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1100000>;
+		regulator-max-microvolt = <1100000>;
+		regulator-ramp-delay = <50>; /* 4ms */
+
+		gpios = <&r_pio 0 6 GPIO_ACTIVE_HIGH>;
+		gpios-states = <0x1>;
+		states = <1100000 0x0
+			  1100000 0x1>;
 	};
+};
 
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
+&cpu0 {
+	operating-points = <
+		1008000	1100000
+		816000	1100000
+		624000	1100000
+		480000	1100000
+		312000	1100000
+		240000	1100000
+		120000	1100000
+		>;
+	#cooling-cells = <2>;
+	cooling-min-level = <0>;
+	cooling-max-level = <6>;
+	cpu0-supply = <&vdd_cpux>;
+};
 
-	leds {
-		compatible = "gpio-leds";
-
-		pwr {
-			label = "nanopi:green:pwr";
-			gpios = <&r_pio 0 10 GPIO_ACTIVE_HIGH>;
-			default-state = "on";
+&cpu_thermal {
+	trips {
+		cpu_warm: cpu_warm {
+			temperature = <65000>;
+			hysteresis = <2000>;
+			type = "passive";
 		};
-
-		status {
-			label = "nanopi:blue:status";
-			gpios = <&pio 0 10 GPIO_ACTIVE_HIGH>;
+		cpu_hot: cpu_hot {
+			temperature = <75000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+		cpu_very_hot: cpu_very_hot {
+			temperature = <90000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+		cpu_crit: cpu_crit {
+			temperature = <105000>;
+			hysteresis = <2000>;
+			type = "critical";
 		};
 	};
 
-	reg_gmac_3v3: gmac-3v3 {
-		compatible = "regulator-fixed";
-		regulator-name = "gmac-3v3";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-		startup-delay-us = <100000>;
-		enable-active-high;
-		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>;
-	};
-
-	reg_vcc3v3: vcc3v3 {
-		compatible = "regulator-fixed";
-		regulator-name = "vcc3v3";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-	};
-
-	reg_usb0_vbus: usb0-vbus {
-		compatible = "regulator-fixed";
-		regulator-name = "usb0-vbus";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		enable-active-high;
-		gpio = <&r_pio 0 2 GPIO_ACTIVE_HIGH>; /* PL2 */
-		status = "okay";
+	cooling-maps {
+		cpu_warm_limit_cpu {
+			trip = <&cpu_warm>;
+			cooling-device = <&cpu0 THERMAL_NO_LIMIT 1>;
+		};
+		cpu_hot_limit_cpu {
+			trip = <&cpu_hot>;
+			cooling-device = <&cpu0 2 3>;
+		};
+		cpu_very_hot_limit_cpu {
+			trip = <&cpu_very_hot>;
+			cooling-device = <&cpu0 5 THERMAL_NO_LIMIT>;
+		};
 	};
 };
 
-&ehci0 {
-	status = "okay";
-};
-
-&ehci3 {
-	status = "okay";
-};
-
-&mmc0 {
+&emac {
 	pinctrl-names = "default";
-	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin>;
-	vmmc-supply = <&reg_vcc3v3>;
-	bus-width = <4>;
-	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
+	pinctrl-0 = <&emac_rgmii_pins>;
+	phy-supply = <&reg_gmac_3v3>;
+	phy-handle = <&ext_rgmii_phy>;
+	phy-mode = "rgmii";
+	allwinner,leds-active-low;
 	status = "okay";
 };
 
-&ohci0 {
-	status = "okay";
-};
-
-&ohci3 {
-	status = "okay";
-};
-
-&uart0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&uart0_pins_a>;
-	status = "okay";
-};
-
-&usb_otg {
-	dr_mode = "otg";
-	status = "okay";
-};
-
-&usbphy {
-	/* USB Type-A port's VBUS is always on */
-	usb0_id_det-gpios = <&pio 6 12 GPIO_ACTIVE_HIGH>; /* PG12 */
-	usb0_vbus-supply = <&reg_usb0_vbus>;
-	status = "okay";
+&mdio {
+	ext_rgmii_phy: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0>;
+	};
 };

@@ -46,17 +46,30 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/thermal/thermal.h>
 
 / {
 	model = "Xunlong Orange Pi PC";
 	compatible = "xunlong,orangepi-pc", "allwinner,sun8i-h3";
 
 	aliases {
+		ethernet0 = &emac;
 		serial0 = &uart0;
 	};
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+	};
+
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
 	};
 
 	leds {
@@ -83,7 +96,7 @@
 
 		sw4 {
 			label = "sw4";
-			linux,code = <BTN_0>;
+			linux,code = <KEY_POWER>;
 			gpios = <&r_pio 0 3 GPIO_ACTIVE_LOW>;
 		};
 	};
@@ -97,8 +110,78 @@
 	status = "okay";
 };
 
+&de {
+	status = "okay";
+};
+
 &ehci0 {
 	status = "okay";
+};
+
+&cpu0 {
+	operating-points = <
+		/* kHz	  uV */
+		1368000	1400000
+		1344000	1400000
+		1296000	1340000
+		1248000	1340000
+		1224000	1340000
+		1200000	1320000
+		1152000	1320000
+		1104000	1320000
+		1056000	1320000
+		1008000	1200000
+		960000	1200000
+		816000	1100000
+		648000	1100000
+		480000	1100000
+		240000	1100000
+		120000	1100000
+		>;
+	#cooling-cells = <2>;
+	cooling-min-level = <0>;
+	cooling-max-level = <15>;
+	cpu0-supply = <&vdd_cpu>;
+};
+
+&cpu_thermal {
+	trips {
+		cpu_warm: cpu_warm {
+			temperature = <65000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+		cpu_hot: cpu_hot {
+			temperature = <75000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+		cpu_very_hot: cpu_very_hot {
+			temperature = <90000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+		cpu_crit: cpu_crit {
+			temperature = <105000>;
+			hysteresis = <2000>;
+			type = "critical";
+		};
+	};
+
+	cooling-maps {
+		cpu_warm_limit_cpu {
+			trip = <&cpu_warm>;
+			cooling-device = <&cpu0 THERMAL_NO_LIMIT 10>;
+		};
+		cpu_hot_limit_cpu {
+			trip = <&cpu_hot>;
+			cooling-device = <&cpu0 12 12>;
+		};
+		cpu_very_hot_limit_cpu {
+			trip = <&cpu_very_hot>;
+			cooling-device = <&cpu0 14 THERMAL_NO_LIMIT>;
+		};
+	};
 };
 
 &ehci1 {
@@ -113,9 +196,34 @@
 	status = "okay";
 };
 
+&emac {
+	phy-handle = <&int_mii_phy>;
+	phy-mode = "mii";
+	allwinner,leds-active-low;
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&i2s2 {
+	status = "okay";
+};
+
 &ir {
 	pinctrl-names = "default";
 	pinctrl-0 = <&ir_pins_a>;
+	status = "okay";
+};
+
+&mixer0 {
 	status = "okay";
 };
 
@@ -152,6 +260,20 @@
 	};
 };
 
+&r_i2c {
+	status = "okay";
+
+	vdd_cpu: regulator@65 {
+		compatible = "silergy,sy8106a";
+		reg = <0x65>;
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1400000>;
+		regulator-ramp-delay = <200>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+};
+
 &r_pio {
 	leds_r_opc: led_pins@0 {
 		pins = "PL10";
@@ -166,6 +288,14 @@
 
 &reg_usb0_vbus {
 	gpio = <&r_pio 0 2 GPIO_ACTIVE_HIGH>; /* PL2 */
+	status = "okay";
+};
+
+&sound_hdmi {
+	status = "okay";
+};
+
+&tcon0 {
 	status = "okay";
 };
 

@@ -177,6 +177,7 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 }
 
+char dt_machine_name[64];
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	void *dt_virt = fixmap_remap_fdt(dt_phys);
@@ -198,6 +199,7 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 		return;
 
 	pr_info("Machine model: %s\n", name);
+    strcpy(dt_machine_name, name);
 	dump_stack_set_arch_desc("%s (DT)", name);
 }
 

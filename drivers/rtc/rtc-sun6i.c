@@ -216,6 +216,9 @@ static void __init sun6i_rtc_clk_init(struct device_node *node)
 	writel(SUN6I_LOSC_CTRL_KEY | SUN6I_LOSC_CTRL_EXT_OSC,
 	       rtc->base + SUN6I_LOSC_CTRL);
 
+	writel(SUN6I_LOSC_OUT_GATING_EN,
+			   rtc->base + SUN6I_LOSC_OUT_GATING);
+
 	/* Yes, I know, this is ugly. */
 	sun6i_rtc = rtc;
 

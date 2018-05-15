@@ -884,6 +884,9 @@ const char * __init of_flat_dt_get_machine_name(void)
  * Iterate through machine match tables to find the best match for the machine
  * compatible string in the FDT.
  */
+#ifndef CONFIG_ARM64
+char dt_machine_name[64];
+#endif
 const void * __init of_flat_dt_match_machine(const void *default_match,
 		const void * (*get_next_compat)(const char * const**))
 {
@@ -920,7 +923,9 @@ const void * __init of_flat_dt_match_machine(const void *default_match,
 	}
 
 	pr_info("Machine model: %s\n", of_flat_dt_get_machine_name());
-
+#ifndef CONFIG_ARM64
+	strcpy(dt_machine_name, of_flat_dt_get_machine_name());
+#endif
 	return best_data;
 }
 
