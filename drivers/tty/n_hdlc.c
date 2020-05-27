@@ -115,10 +115,8 @@
 struct n_hdlc_buf {
 	struct list_head  list_item;
 	int		  count;
-	char		  buf[1];
+	char		  buf[];
 };
-
-#define	N_HDLC_BUF_SIZE	(sizeof(struct n_hdlc_buf) + maxframe)
 
 struct n_hdlc_buf_list {
 	struct list_head  list;
@@ -524,7 +522,8 @@ static void n_hdlc_tty_receive(struct tty_struct *tty, const __u8 *data,
 		/* no buffers in free list, attempt to allocate another rx buffer */
 		/* unless the maximum count has been reached */
 		if (n_hdlc->rx_buf_list.count < MAX_RX_BUF_COUNT)
-			buf = kmalloc(N_HDLC_BUF_SIZE, GFP_ATOMIC);
+			buf = kmalloc(struct_size(buf, buf, maxframe),
+				      GFP_ATOMIC);
 	}
 	
 	if (!buf) {
@@ -573,7 +572,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 		return -EIO;
 
 	/* verify user access to buffer */
-	if (!access_ok(VERIFY_WRITE, buf, nr)) {
+	if (!access_ok(buf, nr)) {
 		printk(KERN_WARNING "%s(%d) n_hdlc_tty_read() can't verify user "
 		"buffer\n", __FILE__, __LINE__);
 		return -EFAULT;
@@ -597,6 +596,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 				/* too large for caller's buffer */
 				ret = -EOVERFLOW;
 			} else {
+				__set_current_state(TASK_RUNNING);
 				if (copy_to_user(buf, rbuf->buf, rbuf->count))
 					ret = -EFAULT;
 				else
@@ -612,7 +612,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 		}
 			
 		/* no data */
-		if (file->f_flags & O_NONBLOCK) {
+		if (tty_io_nonblock(tty, file)) {
 			ret = -EAGAIN;
 			break;
 		}
@@ -679,7 +679,7 @@ static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
 		if (tbuf)
 			break;
 
-		if (file->f_flags & O_NONBLOCK) {
+		if (tty_io_nonblock(tty, file)) {
 			error = -EAGAIN;
 			break;
 		}
@@ -776,7 +776,7 @@ static int n_hdlc_tty_ioctl(struct tty_struct *tty, struct file *file,
 		case TCOFLUSH:
 			flush_tx_queue(tty);
 		}
-		/* fall through to default */
+		/* fall through - to default */
 
 	default:
 		error = n_tty_ioctl_helper(tty, file, cmd, arg);
@@ -852,7 +852,7 @@ static struct n_hdlc *n_hdlc_alloc(void)
 
 	/* allocate free rx buffer list */
 	for(i=0;i<DEFAULT_RX_BUF_COUNT;i++) {
-		buf = kmalloc(N_HDLC_BUF_SIZE, GFP_KERNEL);
+		buf = kmalloc(struct_size(buf, buf, maxframe), GFP_KERNEL);
 		if (buf)
 			n_hdlc_buf_put(&n_hdlc->rx_free_buf_list,buf);
 		else if (debuglevel >= DEBUG_LEVEL_INFO)	
@@ -861,7 +861,7 @@ static struct n_hdlc *n_hdlc_alloc(void)
 	
 	/* allocate free tx buffer list */
 	for(i=0;i<DEFAULT_TX_BUF_COUNT;i++) {
-		buf = kmalloc(N_HDLC_BUF_SIZE, GFP_KERNEL);
+		buf = kmalloc(struct_size(buf, buf, maxframe), GFP_KERNEL);
 		if (buf)
 			n_hdlc_buf_put(&n_hdlc->tx_free_buf_list,buf);
 		else if (debuglevel >= DEBUG_LEVEL_INFO)	
@@ -966,6 +966,11 @@ static int __init n_hdlc_init(void)
 	return status;
 	
 }	/* end of init_module() */
+
+#ifdef CONFIG_SPARC
+#undef __exitdata
+#define __exitdata
+#endif
 
 static const char hdlc_unregister_ok[] __exitdata =
 	KERN_INFO "N_HDLC: line discipline unregistered\n";

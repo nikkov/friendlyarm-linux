@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  kernel/sched/cpupri.c
  *
@@ -14,24 +15,14 @@
  *
  *  going from the lowest priority to the highest.  CPUs in the INVALID state
  *  are not eligible for routing.  The system maintains this state with
- *  a 2 dimensional bitmap (the first for priority class, the second for cpus
+ *  a 2 dimensional bitmap (the first for priority class, the second for CPUs
  *  in that class).  Therefore a typical application without affinity
  *  restrictions can find a suitable CPU with O(1) complexity (e.g. two bit
  *  searches).  For tasks with affinity restrictions, the algorithm has a
  *  worst case complexity of O(min(102, nr_domcpus)), though the scenario that
  *  yields the worst case search is fairly contrived.
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; version 2
- *  of the License.
  */
-
-#include <linux/gfp.h>
-#include <linux/sched.h>
-#include <linux/sched/rt.h>
-#include <linux/slab.h>
-#include "cpupri.h"
+#include "sched.h"
 
 /* Convert between a 140 based task->prio, and our 102 based cpupri */
 static int convert_prio(int prio)
@@ -55,6 +46,8 @@ static int convert_prio(int prio)
  * @cp: The cpupri context
  * @p: The task
  * @lowest_mask: A mask to fill in with selected CPUs (or NULL)
+ * @fitness_fn: A pointer to a function to do custom checks whether the CPU
+ *              fits a specific criteria so that we only return those CPUs.
  *
  * Note: This function returns the recommended CPUs as calculated during the
  * current invocation.  By the time the call returns, the CPUs may have in
@@ -66,7 +59,8 @@ static int convert_prio(int prio)
  * Return: (int)bool - CPUs were found
  */
 int cpupri_find(struct cpupri *cp, struct task_struct *p,
-		struct cpumask *lowest_mask)
+		struct cpumask *lowest_mask,
+		bool (*fitness_fn)(struct task_struct *p, int cpu))
 {
 	int idx = 0;
 	int task_pri = convert_prio(p->prio);
@@ -103,11 +97,13 @@ int cpupri_find(struct cpupri *cp, struct task_struct *p,
 		if (skip)
 			continue;
 
-		if (cpumask_any_and(&p->cpus_allowed, vec->mask) >= nr_cpu_ids)
+		if (cpumask_any_and(p->cpus_ptr, vec->mask) >= nr_cpu_ids)
 			continue;
 
 		if (lowest_mask) {
-			cpumask_and(lowest_mask, &p->cpus_allowed, vec->mask);
+			int cpu;
+
+			cpumask_and(lowest_mask, p->cpus_ptr, vec->mask);
 
 			/*
 			 * We have to ensure that we have at least one bit
@@ -117,7 +113,23 @@ int cpupri_find(struct cpupri *cp, struct task_struct *p,
 			 * condition, simply act as though we never hit this
 			 * priority level and continue on.
 			 */
-			if (cpumask_any(lowest_mask) >= nr_cpu_ids)
+			if (cpumask_empty(lowest_mask))
+				continue;
+
+			if (!fitness_fn)
+				return 1;
+
+			/* Ensure the capacity of the CPUs fit the task */
+			for_each_cpu(cpu, lowest_mask) {
+				if (!fitness_fn(p, cpu))
+					cpumask_clear_cpu(cpu, lowest_mask);
+			}
+
+			/*
+			 * If no CPU at the current priority can fit the task
+			 * continue looking
+			 */
+			if (cpumask_empty(lowest_mask))
 				continue;
 		}
 
@@ -128,9 +140,9 @@ int cpupri_find(struct cpupri *cp, struct task_struct *p,
 }
 
 /**
- * cpupri_set - update the cpu priority setting
+ * cpupri_set - update the CPU priority setting
  * @cp: The cpupri context
- * @cpu: The target cpu
+ * @cpu: The target CPU
  * @newpri: The priority (INVALID-RT99) to assign to this CPU
  *
  * Note: Assumes cpu_rq(cpu)->lock is locked
@@ -151,7 +163,7 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 		return;
 
 	/*
-	 * If the cpu was currently mapped to a different value, we
+	 * If the CPU was currently mapped to a different value, we
 	 * need to map it to the new value then remove the old value.
 	 * Note, we must add the new value first, otherwise we risk the
 	 * cpu being missed by the priority loop in cpupri_find.

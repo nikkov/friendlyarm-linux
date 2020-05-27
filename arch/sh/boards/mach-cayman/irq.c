@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/mach-cayman/irq.c - SH-5 Cayman Interrupt Support
  *
  * This file handles the board specific parts of the Cayman interrupt system
  *
  * Copyright (C) 2002 Stuart Menefy
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/io.h>
 #include <linux/irq.h>
@@ -140,7 +137,7 @@ void init_cayman_irq(void)
 {
 	int i;
 
-	epld_virt = (unsigned long)ioremap_nocache(EPLD_BASE, 1024);
+	epld_virt = (unsigned long)ioremap(EPLD_BASE, 1024);
 	if (!epld_virt) {
 		printk(KERN_ERR "Cayman IRQ: Unable to remap EPLD\n");
 		return;

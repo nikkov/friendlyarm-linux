@@ -12,22 +12,20 @@
 
 #define DESC_TYPE_CODE_DATA	(1 << 0)
 
-struct efi_uga_draw_protocol_32 {
-	u32 get_mode;
-	u32 set_mode;
-	u32 blt;
-};
+typedef union efi_uga_draw_protocol efi_uga_draw_protocol_t;
 
-struct efi_uga_draw_protocol_64 {
-	u64 get_mode;
-	u64 set_mode;
-	u64 blt;
-};
-
-struct efi_uga_draw_protocol {
-	void *get_mode;
-	void *set_mode;
-	void *blt;
+union efi_uga_draw_protocol {
+	struct {
+		efi_status_t (__efiapi *get_mode)(efi_uga_draw_protocol_t *,
+						  u32*, u32*, u32*, u32*);
+		void *set_mode;
+		void *blt;
+	};
+	struct {
+		u32 get_mode;
+		u32 set_mode;
+		u32 blt;
+	} mixed_mode;
 };
 
 #endif /* BOOT_COMPRESSED_EBOOT_H */

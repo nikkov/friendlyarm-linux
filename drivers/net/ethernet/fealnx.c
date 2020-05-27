@@ -428,7 +428,7 @@ static void getlinktype(struct net_device *dev);
 static void getlinkstatus(struct net_device *dev);
 static void netdev_timer(struct timer_list *t);
 static void reset_timer(struct timer_list *t);
-static void fealnx_tx_timeout(struct net_device *dev);
+static void fealnx_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void init_ring(struct net_device *dev);
 static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t intr_handler(int irq, void *dev_instance);
@@ -1191,7 +1191,7 @@ static void reset_timer(struct timer_list *t)
 }
 
 
-static void fealnx_tx_timeout(struct net_device *dev)
+static void fealnx_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->mem;
@@ -1531,7 +1531,7 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 			/* Free the original skb. */
 			pci_unmap_single(np->pci_dev, np->cur_tx->buffer,
 				np->cur_tx->skbuff->len, PCI_DMA_TODEVICE);
-			dev_kfree_skb_irq(np->cur_tx->skbuff);
+			dev_consume_skb_irq(np->cur_tx->skbuff);
 			np->cur_tx->skbuff = NULL;
 			--np->really_tx_count;
 			if (np->cur_tx->control & TXLD) {

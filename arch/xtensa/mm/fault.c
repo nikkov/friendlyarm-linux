@@ -39,13 +39,13 @@ void do_page_fault(struct pt_regs *regs)
 	struct mm_struct *mm = current->mm;
 	unsigned int exccause = regs->exccause;
 	unsigned int address = regs->excvaddr;
-	siginfo_t info;
+	int code;
 
 	int is_write, is_exec;
-	int fault;
+	vm_fault_t fault;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
-	info.si_code = SEGV_MAPERR;
+	code = SEGV_MAPERR;
 
 	/* We fault-in kernel-space virtual memory on-demand. The
 	 * 'reference' page table is init_mm.pgd.
@@ -91,7 +91,7 @@ retry:
 	 */
 
 good_area:
-	info.si_code = SEGV_ACCERR;
+	code = SEGV_ACCERR;
 
 	if (is_write) {
 		if (!(vma->vm_flags & VM_WRITE))
@@ -157,11 +157,7 @@ bad_area:
 	if (user_mode(regs)) {
 		current->thread.bad_vaddr = address;
 		current->thread.error_code = is_write;
-		info.si_signo = SIGSEGV;
-		info.si_errno = 0;
-		/* info.si_code has been set above */
-		info.si_addr = (void *) address;
-		force_sig_info(SIGSEGV, &info, current);
+		force_sig_fault(SIGSEGV, code, (void *) address);
 		return;
 	}
 	bad_page_fault(regs, address, SIGSEGV);
@@ -186,11 +182,7 @@ do_sigbus:
 	 * or user mode.
 	 */
 	current->thread.bad_vaddr = address;
-	info.si_code = SIGBUS;
-	info.si_errno = 0;
-	info.si_code = BUS_ADRERR;
-	info.si_addr = (void *) address;
-	force_sig_info(SIGBUS, &info, current);
+	force_sig_fault(SIGBUS, BUS_ADRERR, (void *) address);
 
 	/* Kernel mode? Handle exceptions or die */
 	if (!user_mode(regs))
@@ -205,6 +197,8 @@ vmalloc_fault:
 		struct mm_struct *act_mm = current->active_mm;
 		int index = pgd_index(address);
 		pgd_t *pgd, *pgd_k;
+		p4d_t *p4d, *p4d_k;
+		pud_t *pud, *pud_k;
 		pmd_t *pmd, *pmd_k;
 		pte_t *pte_k;
 
@@ -219,8 +213,18 @@ vmalloc_fault:
 
 		pgd_val(*pgd) = pgd_val(*pgd_k);
 
-		pmd = pmd_offset(pgd, address);
-		pmd_k = pmd_offset(pgd_k, address);
+		p4d = p4d_offset(pgd, address);
+		p4d_k = p4d_offset(pgd_k, address);
+		if (!p4d_present(*p4d) || !p4d_present(*p4d_k))
+			goto bad_page_fault;
+
+		pud = pud_offset(p4d, address);
+		pud_k = pud_offset(p4d_k, address);
+		if (!pud_present(*pud) || !pud_present(*pud_k))
+			goto bad_page_fault;
+
+		pmd = pmd_offset(pud, address);
+		pmd_k = pmd_offset(pud_k, address);
 		if (!pmd_present(*pmd) || !pmd_present(*pmd_k))
 			goto bad_page_fault;
 

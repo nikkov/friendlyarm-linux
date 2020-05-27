@@ -1,8 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * Copyright Jonathan Naylor G4KLX (g4klx@g4klx.demon.co.uk)
  * Copyright Alan Cox GW4PTS (alan@lxorguk.ukuu.org.uk)
@@ -211,6 +208,7 @@ static int __must_check nr_add_node(ax25_address *nr, const char *mnemonic,
 		/* refcount initialized at 1 */
 		spin_unlock_bh(&nr_node_list_lock);
 
+		nr_neigh_put(nr_neigh);
 		return 0;
 	}
 	nr_node_lock(nr_node);
@@ -888,23 +886,11 @@ static int nr_node_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static const struct seq_operations nr_node_seqops = {
+const struct seq_operations nr_node_seqops = {
 	.start = nr_node_start,
 	.next = nr_node_next,
 	.stop = nr_node_stop,
 	.show = nr_node_show,
-};
-
-static int nr_node_info_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &nr_node_seqops);
-}
-
-const struct file_operations nr_nodes_fops = {
-	.open = nr_node_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release,
 };
 
 static void *nr_neigh_start(struct seq_file *seq, loff_t *pos)
@@ -954,31 +940,18 @@ static int nr_neigh_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static const struct seq_operations nr_neigh_seqops = {
+const struct seq_operations nr_neigh_seqops = {
 	.start = nr_neigh_start,
 	.next = nr_neigh_next,
 	.stop = nr_neigh_stop,
 	.show = nr_neigh_show,
 };
-
-static int nr_neigh_info_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &nr_neigh_seqops);
-}
-
-const struct file_operations nr_neigh_fops = {
-	.open = nr_neigh_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release,
-};
-
 #endif
 
 /*
  *	Free all memory associated with the nodes and routes lists.
  */
-void __exit nr_rt_free(void)
+void nr_rt_free(void)
 {
 	struct nr_neigh *s = NULL;
 	struct nr_node  *t = NULL;

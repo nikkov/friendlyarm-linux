@@ -1,4 +1,5 @@
 /* Copyright 2008 - 2016 Freescale Semiconductor Inc.
+ * Copyright 2020 NXP
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -51,9 +52,9 @@
 #include <linux/percpu.h>
 #include <linux/dma-mapping.h>
 #include <linux/sort.h>
+#include <linux/phy_fixed.h>
 #include <soc/fsl/bman.h>
 #include <soc/fsl/qman.h>
-
 #include "fman.h"
 #include "fman_port.h"
 #include "mac.h"
@@ -123,7 +124,25 @@ MODULE_PARM_DESC(tx_timeout, "The Tx timeout in ms");
 #define FSL_QMAN_MAX_OAL	127
 
 /* Default alignment for start of data in an Rx FD */
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+/* aligning data start to 64 avoids DMA transaction splits, unless the buffer
+ * is crossing a 4k page boundary
+ */
+#define DPAA_FD_DATA_ALIGNMENT  (fman_has_errata_a050385() ? 64 : 16)
+/* aligning to 256 avoids DMA transaction splits caused by 4k page boundary
+ * crossings; also, all SG fragments except the last must have a size multiple
+ * of 256 to avoid DMA transaction splits
+ */
+#define DPAA_A050385_ALIGN 256
+#define DPAA_FD_RX_DATA_ALIGNMENT (fman_has_errata_a050385() ? \
+				   DPAA_A050385_ALIGN : 16)
+#else
 #define DPAA_FD_DATA_ALIGNMENT  16
+#define DPAA_FD_RX_DATA_ALIGNMENT DPAA_FD_DATA_ALIGNMENT
+#endif
+
+/* The DPAA requires 256 bytes reserved and mapped for the SGT */
+#define DPAA_SGT_SIZE 256
 
 /* Values for the L3R field of the FM Parse Results
  */
@@ -155,8 +174,13 @@ MODULE_PARM_DESC(tx_timeout, "The Tx timeout in ms");
 #define DPAA_PARSE_RESULTS_SIZE sizeof(struct fman_prs_result)
 #define DPAA_TIME_STAMP_SIZE 8
 #define DPAA_HASH_RESULTS_SIZE 8
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+#define DPAA_RX_PRIV_DATA_SIZE (DPAA_A050385_ALIGN - (DPAA_PARSE_RESULTS_SIZE\
+	 + DPAA_TIME_STAMP_SIZE + DPAA_HASH_RESULTS_SIZE))
+#else
 #define DPAA_RX_PRIV_DATA_SIZE	(u16)(DPAA_TX_PRIV_DATA_SIZE + \
 					dpaa_rx_extra_headroom)
+#endif
 
 #define DPAA_ETH_PCD_RXQ_NUM	128
 
@@ -175,31 +199,14 @@ struct fm_port_fqs {
 /* All the dpa bps in use at any moment */
 static struct dpaa_bp *dpaa_bp_array[BM_MAX_NUM_OF_POOLS];
 
-/* The raw buffer size must be cacheline aligned */
 #define DPAA_BP_RAW_SIZE 4096
-/* When using more than one buffer pool, the raw sizes are as follows:
- * 1 bp: 4KB
- * 2 bp: 2KB, 4KB
- * 3 bp: 1KB, 2KB, 4KB
- * 4 bp: 1KB, 2KB, 4KB, 8KB
- */
-static inline size_t bpool_buffer_raw_size(u8 index, u8 cnt)
-{
-	size_t res = DPAA_BP_RAW_SIZE / 4;
-	u8 i;
 
-	for (i = (cnt < 3) ? cnt : 3; i < 3 + index; i++)
-		res *= 2;
-	return res;
-}
-
-/* FMan-DMA requires 16-byte alignment for Rx buffers, but SKB_DATA_ALIGN is
- * even stronger (SMP_CACHE_BYTES-aligned), so we just get away with that,
- * via SKB_WITH_OVERHEAD(). We can't rely on netdev_alloc_frag() giving us
- * half-page-aligned buffers, so we reserve some more space for start-of-buffer
- * alignment.
- */
-#define dpaa_bp_size(raw_size) SKB_WITH_OVERHEAD((raw_size) - SMP_CACHE_BYTES)
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+#define dpaa_bp_size(raw_size) (SKB_WITH_OVERHEAD(raw_size) & \
+				~(DPAA_A050385_ALIGN - 1))
+#else
+#define dpaa_bp_size(raw_size) SKB_WITH_OVERHEAD(raw_size)
+#endif
 
 static int dpaa_max_frm;
 
@@ -285,7 +292,7 @@ static int dpaa_stop(struct net_device *net_dev)
 	/* Allow the Fman (Tx) port to process in-flight frames before we
 	 * try switching it off.
 	 */
-	usleep_range(5000, 10000);
+	msleep(200);
 
 	err = mac_dev->stop(mac_dev);
 	if (err < 0)
@@ -302,10 +309,12 @@ static int dpaa_stop(struct net_device *net_dev)
 		phy_disconnect(net_dev->phydev);
 	net_dev->phydev = NULL;
 
+	msleep(200);
+
 	return err;
 }
 
-static void dpaa_tx_timeout(struct net_device *net_dev)
+static void dpaa_tx_timeout(struct net_device *net_dev, unsigned int txqueue)
 {
 	struct dpaa_percpu_priv *percpu_priv;
 	const struct dpaa_priv	*priv;
@@ -454,6 +463,16 @@ static void dpaa_set_rx_mode(struct net_device *net_dev)
 				  err);
 	}
 
+	if (!!(net_dev->flags & IFF_ALLMULTI) != priv->mac_dev->allmulti) {
+		priv->mac_dev->allmulti = !priv->mac_dev->allmulti;
+		err = priv->mac_dev->set_allmulti(priv->mac_dev->fman_mac,
+						  priv->mac_dev->allmulti);
+		if (err < 0)
+			netif_err(priv, drv, net_dev,
+				  "mac_dev->set_allmulti() = %d\n",
+				  err);
+	}
+
 	err = priv->mac_dev->set_multi(net_dev, priv->mac_dev);
 	if (err < 0)
 		netif_err(priv, drv, net_dev, "mac_dev->set_multi() = %d\n",
@@ -472,7 +491,7 @@ static struct dpaa_bp *dpaa_bpid2pool(int bpid)
 static bool dpaa_bpid2pool_use(int bpid)
 {
 	if (dpaa_bpid2pool(bpid)) {
-		atomic_inc(&dpaa_bp_array[bpid]->refs);
+		refcount_inc(&dpaa_bp_array[bpid]->refs);
 		return true;
 	}
 
@@ -483,7 +502,7 @@ static bool dpaa_bpid2pool_use(int bpid)
 static void dpaa_bpid2pool_map(int bpid, struct dpaa_bp *dpaa_bp)
 {
 	dpaa_bp_array[bpid] = dpaa_bp;
-	atomic_set(&dpaa_bp->refs, 1);
+	refcount_set(&dpaa_bp->refs, 1);
 }
 
 static int dpaa_bp_alloc_pool(struct dpaa_bp *dpaa_bp)
@@ -571,7 +590,7 @@ static void dpaa_bp_free(struct dpaa_bp *dpaa_bp)
 	if (!bp)
 		return;
 
-	if (!atomic_dec_and_test(&bp->refs))
+	if (!refcount_dec_and_test(&bp->refs))
 		return;
 
 	if (bp->free_buf_cb)
@@ -583,10 +602,7 @@ static void dpaa_bp_free(struct dpaa_bp *dpaa_bp)
 
 static void dpaa_bps_free(struct dpaa_priv *priv)
 {
-	int i;
-
-	for (i = 0; i < DPAA_BPS_NUM; i++)
-		dpaa_bp_free(priv->dpaa_bps[i]);
+	dpaa_bp_free(priv->dpaa_bp);
 }
 
 /* Use multiple WQs for FQ assignment:
@@ -654,7 +670,7 @@ static struct dpaa_fq *dpaa_fq_alloc(struct device *dev,
 	struct dpaa_fq *dpaa_fq;
 	int i;
 
-	dpaa_fq = devm_kzalloc(dev, sizeof(*dpaa_fq) * count,
+	dpaa_fq = devm_kcalloc(dev, count, sizeof(*dpaa_fq),
 			       GFP_KERNEL);
 	if (!dpaa_fq)
 		return NULL;
@@ -760,16 +776,17 @@ static void dpaa_release_channel(void)
 	qman_release_pool(rx_pool_channel);
 }
 
-static void dpaa_eth_add_channel(u16 channel)
+static void dpaa_eth_add_channel(u16 channel, struct device *dev)
 {
 	u32 pool = QM_SDQCR_CHANNELS_POOL_CONV(channel);
 	const cpumask_t *cpus = qman_affine_cpus();
 	struct qman_portal *portal;
 	int cpu;
 
-	for_each_cpu(cpu, cpus) {
+	for_each_cpu_and(cpu, cpus, cpu_online_mask) {
 		portal = qman_get_affine_portal(cpu);
 		qman_p_static_dequeue_add(portal, pool);
+		qman_start_using_portal(portal, dev);
 	}
 }
 
@@ -883,12 +900,12 @@ static void dpaa_fq_setup(struct dpaa_priv *priv,
 	u16 channels[NR_CPUS];
 	struct dpaa_fq *fq;
 
-	for_each_cpu(cpu, affine_cpus)
+	for_each_cpu_and(cpu, affine_cpus, cpu_online_mask)
 		channels[num_portals++] = qman_affine_channel(cpu);
 
 	if (num_portals == 0)
 		dev_err(priv->net_dev->dev.parent,
-			"No Qman software (affine) channels found");
+			"No Qman software (affine) channels found\n");
 
 	/* Initialize each FQ in the list */
 	list_for_each_entry(fq, &priv->dpaa_fq_list, list) {
@@ -1158,7 +1175,7 @@ static int dpaa_eth_init_tx_port(struct fman_port *port, struct dpaa_fq *errq,
 	buf_prefix_content.priv_data_size = buf_layout->priv_data_size;
 	buf_prefix_content.pass_prs_result = true;
 	buf_prefix_content.pass_hash_result = true;
-	buf_prefix_content.pass_time_stamp = false;
+	buf_prefix_content.pass_time_stamp = true;
 	buf_prefix_content.data_align = DPAA_FD_DATA_ALIGNMENT;
 
 	params.specific_params.non_rx_params.err_fqid = errq->fqid;
@@ -1184,15 +1201,15 @@ static int dpaa_eth_init_tx_port(struct fman_port *port, struct dpaa_fq *errq,
 	return err;
 }
 
-static int dpaa_eth_init_rx_port(struct fman_port *port, struct dpaa_bp **bps,
-				 size_t count, struct dpaa_fq *errq,
+static int dpaa_eth_init_rx_port(struct fman_port *port, struct dpaa_bp *bp,
+				 struct dpaa_fq *errq,
 				 struct dpaa_fq *defq, struct dpaa_fq *pcdq,
 				 struct dpaa_buffer_layout *buf_layout)
 {
 	struct fman_buffer_prefix_content buf_prefix_content;
 	struct fman_port_rx_params *rx_p;
 	struct fman_port_params params;
-	int i, err;
+	int err;
 
 	memset(&params, 0, sizeof(params));
 	memset(&buf_prefix_content, 0, sizeof(buf_prefix_content));
@@ -1200,8 +1217,8 @@ static int dpaa_eth_init_rx_port(struct fman_port *port, struct dpaa_bp **bps,
 	buf_prefix_content.priv_data_size = buf_layout->priv_data_size;
 	buf_prefix_content.pass_prs_result = true;
 	buf_prefix_content.pass_hash_result = true;
-	buf_prefix_content.pass_time_stamp = false;
-	buf_prefix_content.data_align = DPAA_FD_DATA_ALIGNMENT;
+	buf_prefix_content.pass_time_stamp = true;
+	buf_prefix_content.data_align = DPAA_FD_RX_DATA_ALIGNMENT;
 
 	rx_p = &params.specific_params.rx_params;
 	rx_p->err_fqid = errq->fqid;
@@ -1211,12 +1228,9 @@ static int dpaa_eth_init_rx_port(struct fman_port *port, struct dpaa_bp **bps,
 		rx_p->pcd_fqs_count = DPAA_ETH_PCD_RXQ_NUM;
 	}
 
-	count = min(ARRAY_SIZE(rx_p->ext_buf_pools.ext_buf_pool), count);
-	rx_p->ext_buf_pools.num_of_pools_used = (u8)count;
-	for (i = 0; i < count; i++) {
-		rx_p->ext_buf_pools.ext_buf_pool[i].id =  bps[i]->bpid;
-		rx_p->ext_buf_pools.ext_buf_pool[i].size = (u16)bps[i]->size;
-	}
+	rx_p->ext_buf_pools.num_of_pools_used = 1;
+	rx_p->ext_buf_pools.ext_buf_pool[0].id =  bp->bpid;
+	rx_p->ext_buf_pools.ext_buf_pool[0].size = (u16)bp->size;
 
 	err = fman_port_config(port, &params);
 	if (err) {
@@ -1239,7 +1253,7 @@ static int dpaa_eth_init_rx_port(struct fman_port *port, struct dpaa_bp **bps,
 }
 
 static int dpaa_eth_init_ports(struct mac_device *mac_dev,
-			       struct dpaa_bp **bps, size_t count,
+			       struct dpaa_bp *bp,
 			       struct fm_port_fqs *port_fqs,
 			       struct dpaa_buffer_layout *buf_layout,
 			       struct device *dev)
@@ -1253,7 +1267,7 @@ static int dpaa_eth_init_ports(struct mac_device *mac_dev,
 	if (err)
 		return err;
 
-	err = dpaa_eth_init_rx_port(rxport, bps, count, port_fqs->rx_errq,
+	err = dpaa_eth_init_rx_port(rxport, bp, port_fqs->rx_errq,
 				    port_fqs->rx_defq, port_fqs->rx_pcdq,
 				    &buf_layout[RX]);
 
@@ -1267,7 +1281,7 @@ static int dpaa_bman_release(const struct dpaa_bp *dpaa_bp,
 
 	err = bman_release(dpaa_bp->pool, bmb, cnt);
 	/* Should never occur, address anyway to avoid leaking the buffers */
-	if (unlikely(WARN_ON(err)) && dpaa_bp->free_buf_cb)
+	if (WARN_ON(err) && dpaa_bp->free_buf_cb)
 		while (cnt-- > 0)
 			dpaa_bp->free_buf_cb(dpaa_bp, &bmb[cnt]);
 
@@ -1322,15 +1336,16 @@ static void dpaa_fd_release(const struct net_device *net_dev,
 		vaddr = phys_to_virt(qm_fd_addr(fd));
 		sgt = vaddr + qm_fd_get_offset(fd);
 
-		dma_unmap_single(dpaa_bp->dev, qm_fd_addr(fd), dpaa_bp->size,
-				 DMA_FROM_DEVICE);
+		dma_unmap_page(dpaa_bp->priv->rx_dma_dev, qm_fd_addr(fd),
+			       DPAA_BP_RAW_SIZE, DMA_FROM_DEVICE);
 
 		dpaa_release_sgt_members(sgt);
 
-		addr = dma_map_single(dpaa_bp->dev, vaddr, dpaa_bp->size,
-				      DMA_FROM_DEVICE);
-		if (dma_mapping_error(dpaa_bp->dev, addr)) {
-			dev_err(dpaa_bp->dev, "DMA mapping failed");
+		addr = dma_map_page(dpaa_bp->priv->rx_dma_dev,
+				    virt_to_page(vaddr), 0, DPAA_BP_RAW_SIZE,
+				    DMA_FROM_DEVICE);
+		if (dma_mapping_error(dpaa_bp->priv->rx_dma_dev, addr)) {
+			netdev_err(net_dev, "DMA mapping failed\n");
 			return;
 		}
 		bm_buffer_set64(&bmb, addr);
@@ -1383,7 +1398,7 @@ static void count_ern(struct dpaa_percpu_priv *percpu_priv,
 static int dpaa_enable_tx_csum(struct dpaa_priv *priv,
 			       struct sk_buff *skb,
 			       struct qm_fd *fd,
-			       char *parse_results)
+			       void *parse_results)
 {
 	struct fman_prs_result *parse_result;
 	u16 ethertype = ntohs(skb->protocol);
@@ -1475,25 +1490,24 @@ return_error:
 
 static int dpaa_bp_add_8_bufs(const struct dpaa_bp *dpaa_bp)
 {
-	struct device *dev = dpaa_bp->dev;
+	struct net_device *net_dev = dpaa_bp->priv->net_dev;
 	struct bm_buffer bmb[8];
 	dma_addr_t addr;
-	void *new_buf;
+	struct page *p;
 	u8 i;
 
 	for (i = 0; i < 8; i++) {
-		new_buf = netdev_alloc_frag(dpaa_bp->raw_size);
-		if (unlikely(!new_buf)) {
-			dev_err(dev, "netdev_alloc_frag() failed, size %zu\n",
-				dpaa_bp->raw_size);
+		p = dev_alloc_pages(0);
+		if (unlikely(!p)) {
+			netdev_err(net_dev, "dev_alloc_pages() failed\n");
 			goto release_previous_buffs;
 		}
-		new_buf = PTR_ALIGN(new_buf, SMP_CACHE_BYTES);
 
-		addr = dma_map_single(dev, new_buf,
-				      dpaa_bp->size, DMA_FROM_DEVICE);
-		if (unlikely(dma_mapping_error(dev, addr))) {
-			dev_err(dpaa_bp->dev, "DMA map failed");
+		addr = dma_map_page(dpaa_bp->priv->rx_dma_dev, p, 0,
+				    DPAA_BP_RAW_SIZE, DMA_FROM_DEVICE);
+		if (unlikely(dma_mapping_error(dpaa_bp->priv->rx_dma_dev,
+					       addr))) {
+			netdev_err(net_dev, "DMA map failed\n");
 			goto release_previous_buffs;
 		}
 
@@ -1568,17 +1582,16 @@ static int dpaa_eth_refill_bpools(struct dpaa_priv *priv)
 {
 	struct dpaa_bp *dpaa_bp;
 	int *countptr;
-	int res, i;
+	int res;
 
-	for (i = 0; i < DPAA_BPS_NUM; i++) {
-		dpaa_bp = priv->dpaa_bps[i];
-		if (!dpaa_bp)
-			return -EINVAL;
-		countptr = this_cpu_ptr(dpaa_bp->percpu_count);
-		res  = dpaa_eth_refill_bpool(dpaa_bp, countptr);
-		if (res)
-			return res;
-	}
+	dpaa_bp = priv->dpaa_bp;
+	if (!dpaa_bp)
+		return -EINVAL;
+	countptr = this_cpu_ptr(dpaa_bp->percpu_count);
+	res  = dpaa_eth_refill_bpool(dpaa_bp, countptr);
+	if (res)
+		return res;
+
 	return 0;
 }
 
@@ -1587,53 +1600,73 @@ static int dpaa_eth_refill_bpools(struct dpaa_priv *priv)
  * Skb freeing is not handled here.
  *
  * This function may be called on error paths in the Tx function, so guard
- * against cases when not all fd relevant fields were filled in.
+ * against cases when not all fd relevant fields were filled in. To avoid
+ * reading the invalid transmission timestamp for the error paths set ts to
+ * false.
  *
  * Return the skb backpointer, since for S/G frames the buffer containing it
  * gets freed here.
  */
 static struct sk_buff *dpaa_cleanup_tx_fd(const struct dpaa_priv *priv,
-					  const struct qm_fd *fd)
+					  const struct qm_fd *fd, bool ts)
 {
 	const enum dma_data_direction dma_dir = DMA_TO_DEVICE;
 	struct device *dev = priv->net_dev->dev.parent;
+	struct skb_shared_hwtstamps shhwtstamps;
 	dma_addr_t addr = qm_fd_addr(fd);
+	void *vaddr = phys_to_virt(addr);
 	const struct qm_sg_entry *sgt;
-	struct sk_buff **skbh, *skb;
-	int nr_frags, i;
-
-	skbh = (struct sk_buff **)phys_to_virt(addr);
-	skb = *skbh;
+	struct sk_buff *skb;
+	u64 ns;
+	int i;
 
 	if (unlikely(qm_fd_get_format(fd) == qm_fd_sg)) {
-		nr_frags = skb_shinfo(skb)->nr_frags;
-		dma_unmap_single(dev, addr, qm_fd_get_offset(fd) +
-				 sizeof(struct qm_sg_entry) * (1 + nr_frags),
-				 dma_dir);
+		dma_unmap_page(priv->tx_dma_dev, addr,
+			       qm_fd_get_offset(fd) + DPAA_SGT_SIZE,
+			       dma_dir);
 
 		/* The sgt buffer has been allocated with netdev_alloc_frag(),
 		 * it's from lowmem.
 		 */
-		sgt = phys_to_virt(addr + qm_fd_get_offset(fd));
+		sgt = vaddr + qm_fd_get_offset(fd);
 
 		/* sgt[0] is from lowmem, was dma_map_single()-ed */
-		dma_unmap_single(dev, qm_sg_addr(&sgt[0]),
+		dma_unmap_single(priv->tx_dma_dev, qm_sg_addr(&sgt[0]),
 				 qm_sg_entry_get_len(&sgt[0]), dma_dir);
 
 		/* remaining pages were mapped with skb_frag_dma_map() */
-		for (i = 1; i < nr_frags; i++) {
+		for (i = 1; (i < DPAA_SGT_MAX_ENTRIES) &&
+		     !qm_sg_entry_is_final(&sgt[i - 1]); i++) {
 			WARN_ON(qm_sg_entry_is_ext(&sgt[i]));
 
-			dma_unmap_page(dev, qm_sg_addr(&sgt[i]),
+			dma_unmap_page(priv->tx_dma_dev, qm_sg_addr(&sgt[i]),
 				       qm_sg_entry_get_len(&sgt[i]), dma_dir);
 		}
-
-		/* Free the page frag that we allocated on Tx */
-		skb_free_frag(phys_to_virt(addr));
 	} else {
-		dma_unmap_single(dev, addr,
-				 skb_tail_pointer(skb) - (u8 *)skbh, dma_dir);
+		dma_unmap_single(priv->tx_dma_dev, addr,
+				 priv->tx_headroom + qm_fd_get_length(fd),
+				 dma_dir);
 	}
+
+	skb = *(struct sk_buff **)vaddr;
+
+	/* DMA unmapping is required before accessing the HW provided info */
+	if (ts && priv->tx_tstamp &&
+	    skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
+		memset(&shhwtstamps, 0, sizeof(shhwtstamps));
+
+		if (!fman_port_get_tstamp(priv->mac_dev->port[TX], vaddr,
+					  &ns)) {
+			shhwtstamps.hwtstamp = ns_to_ktime(ns);
+			skb_tstamp_tx(skb, &shhwtstamps);
+		} else {
+			dev_warn(dev, "fman_port_get_tstamp failed!\n");
+		}
+	}
+
+	if (qm_fd_get_format(fd) == qm_fd_sg)
+		/* Free the page that we allocated on Tx for the SGT */
+		free_pages((unsigned long)vaddr, 0);
 
 	return skb;
 }
@@ -1654,6 +1687,8 @@ static u8 rx_csum_offload(const struct dpaa_priv *priv, const struct qm_fd *fd)
 	 */
 	return CHECKSUM_NONE;
 }
+
+#define PTR_IS_ALIGNED(x, a) (IS_ALIGNED((unsigned long)(x), (a)))
 
 /* Build a linear skb around the received buffer.
  * We are guaranteed there is enough room at the end of the data buffer to
@@ -1677,10 +1712,8 @@ static struct sk_buff *contig_fd_to_skb(const struct dpaa_priv *priv,
 
 	skb = build_skb(vaddr, dpaa_bp->size +
 			SKB_DATA_ALIGN(sizeof(struct skb_shared_info)));
-	if (unlikely(!skb)) {
-		WARN_ONCE(1, "Build skb failure on Rx\n");
+	if (WARN_ONCE(!skb, "Build skb failure on Rx\n"))
 		goto free_buffer;
-	}
 	WARN_ON(fd_off != priv->rx_headroom);
 	skb_reserve(skb, fd_off);
 	skb_put(skb, qm_fd_get_length(fd));
@@ -1690,7 +1723,7 @@ static struct sk_buff *contig_fd_to_skb(const struct dpaa_priv *priv,
 	return skb;
 
 free_buffer:
-	skb_free_frag(vaddr);
+	free_pages((unsigned long)vaddr, 0);
 	return NULL;
 }
 
@@ -1714,7 +1747,7 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 	int page_offset;
 	unsigned int sz;
 	int *count_ptr;
-	int i;
+	int i, j;
 
 	vaddr = phys_to_virt(addr);
 	WARN_ON(!IS_ALIGNED((unsigned long)vaddr, SMP_CACHE_BYTES));
@@ -1728,22 +1761,21 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 
 		sg_addr = qm_sg_addr(&sgt[i]);
 		sg_vaddr = phys_to_virt(sg_addr);
-		WARN_ON(!IS_ALIGNED((unsigned long)sg_vaddr,
-				    SMP_CACHE_BYTES));
+		WARN_ON(!PTR_IS_ALIGNED(sg_vaddr, SMP_CACHE_BYTES));
+
+		dma_unmap_page(priv->rx_dma_dev, sg_addr,
+			       DPAA_BP_RAW_SIZE, DMA_FROM_DEVICE);
 
 		/* We may use multiple Rx pools */
 		dpaa_bp = dpaa_bpid2pool(sgt[i].bpid);
 		if (!dpaa_bp)
 			goto free_buffers;
 
-		count_ptr = this_cpu_ptr(dpaa_bp->percpu_count);
-		dma_unmap_single(dpaa_bp->dev, sg_addr, dpaa_bp->size,
-				 DMA_FROM_DEVICE);
 		if (!skb) {
 			sz = dpaa_bp->size +
 				SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 			skb = build_skb(sg_vaddr, sz);
-			if (WARN_ON(unlikely(!skb)))
+			if (WARN_ON(!skb))
 				goto free_buffers;
 
 			skb->ip_summed = rx_csum_offload(priv, fd);
@@ -1781,7 +1813,9 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 			skb_add_rx_frag(skb, i - 1, head_page, frag_off,
 					frag_len, dpaa_bp->size);
 		}
+
 		/* Update the pool count for the current {cpu x bpool} */
+		count_ptr = this_cpu_ptr(dpaa_bp->percpu_count);
 		(*count_ptr)--;
 
 		if (qm_sg_entry_is_final(&sgt[i]))
@@ -1790,35 +1824,34 @@ static struct sk_buff *sg_fd_to_skb(const struct dpaa_priv *priv,
 	WARN_ONCE(i == DPAA_SGT_MAX_ENTRIES, "No final bit on SGT\n");
 
 	/* free the SG table buffer */
-	skb_free_frag(vaddr);
+	free_pages((unsigned long)vaddr, 0);
 
 	return skb;
 
 free_buffers:
-	/* compensate sw bpool counter changes */
-	for (i--; i >= 0; i--) {
-		dpaa_bp = dpaa_bpid2pool(sgt[i].bpid);
-		if (dpaa_bp) {
-			count_ptr = this_cpu_ptr(dpaa_bp->percpu_count);
-			(*count_ptr)++;
-		}
-	}
 	/* free all the SG entries */
-	for (i = 0; i < DPAA_SGT_MAX_ENTRIES ; i++) {
-		sg_addr = qm_sg_addr(&sgt[i]);
+	for (j = 0; j < DPAA_SGT_MAX_ENTRIES ; j++) {
+		sg_addr = qm_sg_addr(&sgt[j]);
 		sg_vaddr = phys_to_virt(sg_addr);
-		skb_free_frag(sg_vaddr);
-		dpaa_bp = dpaa_bpid2pool(sgt[i].bpid);
-		if (dpaa_bp) {
-			count_ptr = this_cpu_ptr(dpaa_bp->percpu_count);
-			(*count_ptr)--;
+		/* all pages 0..i were unmaped */
+		if (j > i)
+			dma_unmap_page(priv->rx_dma_dev, qm_sg_addr(&sgt[j]),
+				       DPAA_BP_RAW_SIZE, DMA_FROM_DEVICE);
+		free_pages((unsigned long)sg_vaddr, 0);
+		/* counters 0..i-1 were decremented */
+		if (j >= i) {
+			dpaa_bp = dpaa_bpid2pool(sgt[j].bpid);
+			if (dpaa_bp) {
+				count_ptr = this_cpu_ptr(dpaa_bp->percpu_count);
+				(*count_ptr)--;
+			}
 		}
 
-		if (qm_sg_entry_is_final(&sgt[i]))
+		if (qm_sg_entry_is_final(&sgt[j]))
 			break;
 	}
 	/* free the SGT fragment */
-	skb_free_frag(vaddr);
+	free_pages((unsigned long)vaddr, 0);
 
 	return NULL;
 }
@@ -1828,9 +1861,8 @@ static int skb_to_contig_fd(struct dpaa_priv *priv,
 			    int *offset)
 {
 	struct net_device *net_dev = priv->net_dev;
-	struct device *dev = net_dev->dev.parent;
 	enum dma_data_direction dma_dir;
-	unsigned char *buffer_start;
+	unsigned char *buff_start;
 	struct sk_buff **skbh;
 	dma_addr_t addr;
 	int err;
@@ -1839,10 +1871,10 @@ static int skb_to_contig_fd(struct dpaa_priv *priv,
 	 * available, so just use that for offset.
 	 */
 	fd->bpid = FSL_DPAA_BPID_INV;
-	buffer_start = skb->data - priv->tx_headroom;
+	buff_start = skb->data - priv->tx_headroom;
 	dma_dir = DMA_TO_DEVICE;
 
-	skbh = (struct sk_buff **)buffer_start;
+	skbh = (struct sk_buff **)buff_start;
 	*skbh = skb;
 
 	/* Enable L3/L4 hardware checksum computation.
@@ -1851,7 +1883,7 @@ static int skb_to_contig_fd(struct dpaa_priv *priv,
 	 * need to write into the skb.
 	 */
 	err = dpaa_enable_tx_csum(priv, skb, fd,
-				  ((char *)skbh) + DPAA_TX_PRIV_DATA_SIZE);
+				  buff_start + DPAA_TX_PRIV_DATA_SIZE);
 	if (unlikely(err < 0)) {
 		if (net_ratelimit())
 			netif_err(priv, tx_err, net_dev, "HW csum error: %d\n",
@@ -1864,9 +1896,9 @@ static int skb_to_contig_fd(struct dpaa_priv *priv,
 	fd->cmd |= cpu_to_be32(FM_FD_CMD_FCO);
 
 	/* Map the entire buffer size that may be seen by FMan, but no more */
-	addr = dma_map_single(dev, skbh,
-			      skb_tail_pointer(skb) - buffer_start, dma_dir);
-	if (unlikely(dma_mapping_error(dev, addr))) {
+	addr = dma_map_single(priv->tx_dma_dev, buff_start,
+			      priv->tx_headroom + skb->len, dma_dir);
+	if (unlikely(dma_mapping_error(priv->tx_dma_dev, addr))) {
 		if (net_ratelimit())
 			netif_err(priv, tx_err, net_dev, "dma_map_single() failed\n");
 		return -EINVAL;
@@ -1882,25 +1914,22 @@ static int skb_to_sg_fd(struct dpaa_priv *priv,
 	const enum dma_data_direction dma_dir = DMA_TO_DEVICE;
 	const int nr_frags = skb_shinfo(skb)->nr_frags;
 	struct net_device *net_dev = priv->net_dev;
-	struct device *dev = net_dev->dev.parent;
 	struct qm_sg_entry *sgt;
 	struct sk_buff **skbh;
-	int i, j, err, sz;
-	void *buffer_start;
+	void *buff_start;
 	skb_frag_t *frag;
 	dma_addr_t addr;
 	size_t frag_len;
-	void *sgt_buf;
+	struct page *p;
+	int i, j, err;
 
-	/* get a page frag to store the SGTable */
-	sz = SKB_DATA_ALIGN(priv->tx_headroom +
-		sizeof(struct qm_sg_entry) * (1 + nr_frags));
-	sgt_buf = netdev_alloc_frag(sz);
-	if (unlikely(!sgt_buf)) {
-		netdev_err(net_dev, "netdev_alloc_frag() failed for size %d\n",
-			   sz);
+	/* get a page to store the SGTable */
+	p = dev_alloc_pages(0);
+	if (unlikely(!p)) {
+		netdev_err(net_dev, "dev_alloc_pages() failed\n");
 		return -ENOMEM;
 	}
+	buff_start = page_address(p);
 
 	/* Enable L3/L4 hardware checksum computation.
 	 *
@@ -1908,7 +1937,7 @@ static int skb_to_sg_fd(struct dpaa_priv *priv,
 	 * need to write into the skb.
 	 */
 	err = dpaa_enable_tx_csum(priv, skb, fd,
-				  sgt_buf + DPAA_TX_PRIV_DATA_SIZE);
+				  buff_start + DPAA_TX_PRIV_DATA_SIZE);
 	if (unlikely(err < 0)) {
 		if (net_ratelimit())
 			netif_err(priv, tx_err, net_dev, "HW csum error: %d\n",
@@ -1916,54 +1945,56 @@ static int skb_to_sg_fd(struct dpaa_priv *priv,
 		goto csum_failed;
 	}
 
-	sgt = (struct qm_sg_entry *)(sgt_buf + priv->tx_headroom);
-	qm_sg_entry_set_len(&sgt[0], skb_headlen(skb));
+	/* SGT[0] is used by the linear part */
+	sgt = (struct qm_sg_entry *)(buff_start + priv->tx_headroom);
+	frag_len = skb_headlen(skb);
+	qm_sg_entry_set_len(&sgt[0], frag_len);
 	sgt[0].bpid = FSL_DPAA_BPID_INV;
 	sgt[0].offset = 0;
-	addr = dma_map_single(dev, skb->data,
+	addr = dma_map_single(priv->tx_dma_dev, skb->data,
 			      skb_headlen(skb), dma_dir);
-	if (unlikely(dma_mapping_error(dev, addr))) {
-		dev_err(dev, "DMA mapping failed");
+	if (unlikely(dma_mapping_error(priv->tx_dma_dev, addr))) {
+		netdev_err(priv->net_dev, "DMA mapping failed\n");
 		err = -EINVAL;
 		goto sg0_map_failed;
 	}
 	qm_sg_entry_set64(&sgt[0], addr);
 
 	/* populate the rest of SGT entries */
-	frag = &skb_shinfo(skb)->frags[0];
-	frag_len = frag->size;
-	for (i = 1; i <= nr_frags; i++, frag++) {
+	for (i = 0; i < nr_frags; i++) {
+		frag = &skb_shinfo(skb)->frags[i];
+		frag_len = skb_frag_size(frag);
 		WARN_ON(!skb_frag_page(frag));
-		addr = skb_frag_dma_map(dev, frag, 0,
+		addr = skb_frag_dma_map(priv->tx_dma_dev, frag, 0,
 					frag_len, dma_dir);
-		if (unlikely(dma_mapping_error(dev, addr))) {
-			dev_err(dev, "DMA mapping failed");
+		if (unlikely(dma_mapping_error(priv->tx_dma_dev, addr))) {
+			netdev_err(priv->net_dev, "DMA mapping failed\n");
 			err = -EINVAL;
 			goto sg_map_failed;
 		}
 
-		qm_sg_entry_set_len(&sgt[i], frag_len);
-		sgt[i].bpid = FSL_DPAA_BPID_INV;
-		sgt[i].offset = 0;
+		qm_sg_entry_set_len(&sgt[i + 1], frag_len);
+		sgt[i + 1].bpid = FSL_DPAA_BPID_INV;
+		sgt[i + 1].offset = 0;
 
 		/* keep the offset in the address */
-		qm_sg_entry_set64(&sgt[i], addr);
-		frag_len = frag->size;
+		qm_sg_entry_set64(&sgt[i + 1], addr);
 	}
-	qm_sg_entry_set_f(&sgt[i - 1], frag_len);
 
+	/* Set the final bit in the last used entry of the SGT */
+	qm_sg_entry_set_f(&sgt[nr_frags], frag_len);
+
+	/* set fd offset to priv->tx_headroom */
 	qm_fd_set_sg(fd, priv->tx_headroom, skb->len);
 
 	/* DMA map the SGT page */
-	buffer_start = (void *)sgt - priv->tx_headroom;
-	skbh = (struct sk_buff **)buffer_start;
+	skbh = (struct sk_buff **)buff_start;
 	*skbh = skb;
 
-	addr = dma_map_single(dev, buffer_start, priv->tx_headroom +
-			      sizeof(struct qm_sg_entry) * (1 + nr_frags),
-			      dma_dir);
-	if (unlikely(dma_mapping_error(dev, addr))) {
-		dev_err(dev, "DMA mapping failed");
+	addr = dma_map_page(priv->tx_dma_dev, p, 0,
+			    priv->tx_headroom + DPAA_SGT_SIZE, dma_dir);
+	if (unlikely(dma_mapping_error(priv->tx_dma_dev, addr))) {
+		netdev_err(priv->net_dev, "DMA mapping failed\n");
 		err = -EINVAL;
 		goto sgt_map_failed;
 	}
@@ -1977,11 +2008,11 @@ static int skb_to_sg_fd(struct dpaa_priv *priv,
 sgt_map_failed:
 sg_map_failed:
 	for (j = 0; j < i; j++)
-		dma_unmap_page(dev, qm_sg_addr(&sgt[j]),
+		dma_unmap_page(priv->tx_dma_dev, qm_sg_addr(&sgt[j]),
 			       qm_sg_entry_get_len(&sgt[j]), dma_dir);
 sg0_map_failed:
 csum_failed:
-	skb_free_frag(sgt_buf);
+	free_pages((unsigned long)buff_start, 0);
 
 	return err;
 }
@@ -2008,7 +2039,6 @@ static inline int dpaa_xmit(struct dpaa_priv *priv,
 	}
 
 	if (unlikely(err < 0)) {
-		percpu_stats->tx_errors++;
 		percpu_stats->tx_fifo_errors++;
 		return err;
 	}
@@ -2019,12 +2049,83 @@ static inline int dpaa_xmit(struct dpaa_priv *priv,
 	return 0;
 }
 
-static int dpaa_start_xmit(struct sk_buff *skb, struct net_device *net_dev)
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+int dpaa_a050385_wa(struct net_device *net_dev, struct sk_buff **s)
+{
+	struct dpaa_priv *priv = netdev_priv(net_dev);
+	struct sk_buff *new_skb, *skb = *s;
+	unsigned char *start, i;
+
+	/* check linear buffer alignment */
+	if (!PTR_IS_ALIGNED(skb->data, DPAA_A050385_ALIGN))
+		goto workaround;
+
+	/* linear buffers just need to have an aligned start */
+	if (!skb_is_nonlinear(skb))
+		return 0;
+
+	/* linear data size for nonlinear skbs needs to be aligned */
+	if (!IS_ALIGNED(skb_headlen(skb), DPAA_A050385_ALIGN))
+		goto workaround;
+
+	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
+		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
+
+		/* all fragments need to have aligned start addresses */
+		if (!IS_ALIGNED(skb_frag_off(frag), DPAA_A050385_ALIGN))
+			goto workaround;
+
+		/* all but last fragment need to have aligned sizes */
+		if (!IS_ALIGNED(skb_frag_size(frag), DPAA_A050385_ALIGN) &&
+		    (i < skb_shinfo(skb)->nr_frags - 1))
+			goto workaround;
+	}
+
+	return 0;
+
+workaround:
+	/* copy all the skb content into a new linear buffer */
+	new_skb = netdev_alloc_skb(net_dev, skb->len + DPAA_A050385_ALIGN - 1 +
+						priv->tx_headroom);
+	if (!new_skb)
+		return -ENOMEM;
+
+	/* NET_SKB_PAD bytes already reserved, adding up to tx_headroom */
+	skb_reserve(new_skb, priv->tx_headroom - NET_SKB_PAD);
+
+	/* Workaround for DPAA_A050385 requires data start to be aligned */
+	start = PTR_ALIGN(new_skb->data, DPAA_A050385_ALIGN);
+	if (start - new_skb->data != 0)
+		skb_reserve(new_skb, start - new_skb->data);
+
+	skb_put(new_skb, skb->len);
+	skb_copy_bits(skb, 0, new_skb->data, skb->len);
+	skb_copy_header(new_skb, skb);
+	new_skb->dev = skb->dev;
+
+	/* We move the headroom when we align it so we have to reset the
+	 * network and transport header offsets relative to the new data
+	 * pointer. The checksum offload relies on these offsets.
+	 */
+	skb_set_network_header(new_skb, skb_network_offset(skb));
+	skb_set_transport_header(new_skb, skb_transport_offset(skb));
+
+	/* TODO: does timestamping need the result in the old skb? */
+	dev_kfree_skb(skb);
+	*s = new_skb;
+
+	return 0;
+}
+#endif
+
+static netdev_tx_t
+dpaa_start_xmit(struct sk_buff *skb, struct net_device *net_dev)
 {
 	const int queue_mapping = skb_get_queue_mapping(skb);
 	bool nonlinear = skb_is_nonlinear(skb);
 	struct rtnl_link_stats64 *percpu_stats;
 	struct dpaa_percpu_priv *percpu_priv;
+	struct netdev_queue *txq;
 	struct dpaa_priv *priv;
 	struct qm_fd fd;
 	int offset = 0;
@@ -2052,28 +2153,50 @@ static int dpaa_start_xmit(struct sk_buff *skb, struct net_device *net_dev)
 	/* MAX_SKB_FRAGS is equal or larger than our dpaa_SGT_MAX_ENTRIES;
 	 * make sure we don't feed FMan with more fragments than it supports.
 	 */
-	if (nonlinear &&
-	    likely(skb_shinfo(skb)->nr_frags < DPAA_SGT_MAX_ENTRIES)) {
+	if (unlikely(nonlinear &&
+		     (skb_shinfo(skb)->nr_frags >= DPAA_SGT_MAX_ENTRIES))) {
+		/* If the egress skb contains more fragments than we support
+		 * we have no choice but to linearize it ourselves.
+		 */
+		if (__skb_linearize(skb))
+			goto enomem;
+
+		nonlinear = skb_is_nonlinear(skb);
+	}
+
+#ifdef CONFIG_DPAA_ERRATUM_A050385
+	if (unlikely(fman_has_errata_a050385())) {
+		if (dpaa_a050385_wa(net_dev, &skb))
+			goto enomem;
+		nonlinear = skb_is_nonlinear(skb);
+	}
+#endif
+
+	if (nonlinear) {
 		/* Just create a S/G fd based on the skb */
 		err = skb_to_sg_fd(priv, skb, &fd);
 		percpu_priv->tx_frag_skbuffs++;
 	} else {
-		/* If the egress skb contains more fragments than we support
-		 * we have no choice but to linearize it ourselves.
-		 */
-		if (unlikely(nonlinear) && __skb_linearize(skb))
-			goto enomem;
-
-		/* Finally, create a contig FD from this skb */
+		/* Create a contig FD from this skb */
 		err = skb_to_contig_fd(priv, skb, &fd, &offset);
 	}
 	if (unlikely(err < 0))
 		goto skb_to_fd_failed;
 
+	txq = netdev_get_tx_queue(net_dev, queue_mapping);
+
+	/* LLTX requires to do our own update of trans_start */
+	txq->trans_start = jiffies;
+
+	if (priv->tx_tstamp && skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
+		fd.cmd |= cpu_to_be32(FM_FD_CMD_UPD);
+		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
+	}
+
 	if (likely(dpaa_xmit(priv, percpu_stats, queue_mapping, &fd) == 0))
 		return NETDEV_TX_OK;
 
-	dpaa_cleanup_tx_fd(priv, &fd);
+	dpaa_cleanup_tx_fd(priv, &fd, false);
 skb_to_fd_failed:
 enomem:
 	percpu_stats->tx_errors++;
@@ -2119,7 +2242,7 @@ static void dpaa_tx_error(struct net_device *net_dev,
 
 	percpu_priv->stats.tx_errors++;
 
-	skb = dpaa_cleanup_tx_fd(priv, fd);
+	skb = dpaa_cleanup_tx_fd(priv, fd, false);
 	dev_kfree_skb(skb);
 }
 
@@ -2133,7 +2256,6 @@ static int dpaa_eth_poll(struct napi_struct *napi, int budget)
 	if (cleaned < budget) {
 		napi_complete_done(napi, cleaned);
 		qman_p_irqsource_add(np->p, QM_PIRQ_DQRI);
-
 	} else if (np->down) {
 		qman_p_irqsource_add(np->p, QM_PIRQ_DQRI);
 	}
@@ -2160,7 +2282,7 @@ static void dpaa_tx_conf(struct net_device *net_dev,
 
 	percpu_priv->tx_confirm++;
 
-	skb = dpaa_cleanup_tx_fd(priv, fd);
+	skb = dpaa_cleanup_tx_fd(priv, fd, true);
 
 	consume_skb(skb);
 }
@@ -2201,14 +2323,8 @@ static enum qman_cb_dqrr_result rx_error_dqrr(struct qman_portal *portal,
 	if (dpaa_eth_napi_schedule(percpu_priv, portal))
 		return qman_cb_dqrr_stop;
 
-	if (dpaa_eth_refill_bpools(priv))
-		/* Unable to refill the buffer pool due to insufficient
-		 * system memory. Just release the frame back into the pool,
-		 * otherwise we'll soon end up with an empty buffer pool.
-		 */
-		dpaa_fd_release(net_dev, &dq->fd);
-	else
-		dpaa_rx_error(net_dev, priv, percpu_priv, &dq->fd, fq->fqid);
+	dpaa_eth_refill_bpools(priv);
+	dpaa_rx_error(net_dev, priv, percpu_priv, &dq->fd, fq->fqid);
 
 	return qman_cb_dqrr_consume;
 }
@@ -2217,6 +2333,7 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 						struct qman_fq *fq,
 						const struct qm_dqrr_entry *dq)
 {
+	struct skb_shared_hwtstamps *shhwtstamps;
 	struct rtnl_link_stats64 *percpu_stats;
 	struct dpaa_percpu_priv *percpu_priv;
 	const struct qm_fd *fd = &dq->fd;
@@ -2230,6 +2347,7 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 	struct sk_buff *skb;
 	int *count_ptr;
 	void *vaddr;
+	u64 ns;
 
 	fd_status = be32_to_cpu(fd->status);
 	fd_format = qm_fd_get_format(fd);
@@ -2268,17 +2386,13 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 		return qman_cb_dqrr_consume;
 	}
 
-	dpaa_bp = dpaa_bpid2pool(fd->bpid);
-	if (!dpaa_bp)
-		return qman_cb_dqrr_consume;
-
-	dma_unmap_single(dpaa_bp->dev, addr, dpaa_bp->size, DMA_FROM_DEVICE);
+	dma_unmap_page(dpaa_bp->priv->rx_dma_dev, addr, DPAA_BP_RAW_SIZE,
+		       DMA_FROM_DEVICE);
 
 	/* prefetch the first 64 bytes of the frame or the SGT start */
 	vaddr = phys_to_virt(addr);
 	prefetch(vaddr + qm_fd_get_offset(fd));
 
-	fd_format = qm_fd_get_format(fd);
 	/* The only FD types that we may receive are contig and S/G */
 	WARN_ON((fd_format != qm_fd_contig) && (fd_format != qm_fd_sg));
 
@@ -2294,6 +2408,16 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 		skb = sg_fd_to_skb(priv, fd);
 	if (!skb)
 		return qman_cb_dqrr_consume;
+
+	if (priv->rx_tstamp) {
+		shhwtstamps = skb_hwtstamps(skb);
+		memset(shhwtstamps, 0, sizeof(*shhwtstamps));
+
+		if (!fman_port_get_tstamp(priv->mac_dev->port[RX], vaddr, &ns))
+			shhwtstamps->hwtstamp = ns_to_ktime(ns);
+		else
+			dev_warn(net_dev->dev.parent, "fman_port_get_tstamp failed!\n");
+	}
 
 	skb->protocol = eth_type_trans(skb, net_dev);
 
@@ -2311,8 +2435,10 @@ static enum qman_cb_dqrr_result rx_default_dqrr(struct qman_portal *portal,
 
 	skb_len = skb->len;
 
-	if (unlikely(netif_receive_skb(skb) == NET_RX_DROP))
+	if (unlikely(netif_receive_skb(skb) == NET_RX_DROP)) {
+		percpu_stats->rx_dropped++;
 		return qman_cb_dqrr_consume;
+	}
 
 	percpu_stats->rx_packets++;
 	percpu_stats->rx_bytes += skb_len;
@@ -2383,7 +2509,7 @@ static void egress_ern(struct qman_portal *portal,
 	percpu_priv->stats.tx_fifo_errors++;
 	count_ern(percpu_priv, msg);
 
-	skb = dpaa_cleanup_tx_fd(priv, fd);
+	skb = dpaa_cleanup_tx_fd(priv, fd, false);
 	dev_kfree_skb_any(skb);
 }
 
@@ -2400,7 +2526,7 @@ static void dpaa_eth_napi_enable(struct dpaa_priv *priv)
 	struct dpaa_percpu_priv *percpu_priv;
 	int i;
 
-	for_each_possible_cpu(i) {
+	for_each_online_cpu(i) {
 		percpu_priv = per_cpu_ptr(priv->percpu_priv, i);
 
 		percpu_priv->np.down = 0;
@@ -2413,7 +2539,7 @@ static void dpaa_eth_napi_disable(struct dpaa_priv *priv)
 	struct dpaa_percpu_priv *percpu_priv;
 	int i;
 
-	for_each_possible_cpu(i) {
+	for_each_online_cpu(i) {
 		percpu_priv = per_cpu_ptr(priv->percpu_priv, i);
 
 		percpu_priv->np.down = 1;
@@ -2431,8 +2557,12 @@ static void dpaa_adjust_link(struct net_device *net_dev)
 	mac_dev->adjust_link(mac_dev);
 }
 
+/* The Aquantia PHYs are capable of performing rate adaptation */
+#define PHY_VEND_AQUANTIA	0x03a1b400
+
 static int dpaa_phy_init(struct net_device *net_dev)
 {
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
 	struct mac_device *mac_dev;
 	struct phy_device *phy_dev;
 	struct dpaa_priv *priv;
@@ -2448,10 +2578,16 @@ static int dpaa_phy_init(struct net_device *net_dev)
 		return -ENODEV;
 	}
 
-	/* Remove any features not supported by the controller */
-	phy_dev->supported &= mac_dev->if_support;
-	phy_dev->supported |= (SUPPORTED_Pause | SUPPORTED_Asym_Pause);
-	phy_dev->advertising = phy_dev->supported;
+	/* Unless the PHY is capable of rate adaptation */
+	if (mac_dev->phy_if != PHY_INTERFACE_MODE_XGMII ||
+	    ((phy_dev->drv->phy_id & GENMASK(31, 10)) != PHY_VEND_AQUANTIA)) {
+		/* remove any features not supported by the controller */
+		ethtool_convert_legacy_u32_to_link_mode(mask,
+							mac_dev->if_support);
+		linkmode_and(phy_dev->supported, phy_dev->supported, mask);
+	}
+
+	phy_support_asym_pause(phy_dev);
 
 	mac_dev->phy_dev = phy_dev;
 	net_dev->phydev = phy_dev;
@@ -2512,11 +2648,58 @@ static int dpaa_eth_stop(struct net_device *net_dev)
 	return err;
 }
 
+static int dpaa_ts_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+{
+	struct dpaa_priv *priv = netdev_priv(dev);
+	struct hwtstamp_config config;
+
+	if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
+		return -EFAULT;
+
+	switch (config.tx_type) {
+	case HWTSTAMP_TX_OFF:
+		/* Couldn't disable rx/tx timestamping separately.
+		 * Do nothing here.
+		 */
+		priv->tx_tstamp = false;
+		break;
+	case HWTSTAMP_TX_ON:
+		priv->mac_dev->set_tstamp(priv->mac_dev->fman_mac, true);
+		priv->tx_tstamp = true;
+		break;
+	default:
+		return -ERANGE;
+	}
+
+	if (config.rx_filter == HWTSTAMP_FILTER_NONE) {
+		/* Couldn't disable rx/tx timestamping separately.
+		 * Do nothing here.
+		 */
+		priv->rx_tstamp = false;
+	} else {
+		priv->mac_dev->set_tstamp(priv->mac_dev->fman_mac, true);
+		priv->rx_tstamp = true;
+		/* TS is set for all frame types, not only those requested */
+		config.rx_filter = HWTSTAMP_FILTER_ALL;
+	}
+
+	return copy_to_user(rq->ifr_data, &config, sizeof(config)) ?
+			-EFAULT : 0;
+}
+
 static int dpaa_ioctl(struct net_device *net_dev, struct ifreq *rq, int cmd)
 {
-	if (!net_dev->phydev)
-		return -EINVAL;
-	return phy_mii_ioctl(net_dev->phydev, rq, cmd);
+	int ret = -EINVAL;
+
+	if (cmd == SIOCGMIIREG) {
+		if (net_dev->phydev)
+			return phy_mii_ioctl(net_dev->phydev, rq, cmd);
+	}
+
+	if (cmd == SIOCSHWTSTAMP)
+		return dpaa_ts_ioctl(net_dev, rq, cmd);
+
+	return ret;
 }
 
 static const struct net_device_ops dpaa_ops = {
@@ -2525,6 +2708,7 @@ static const struct net_device_ops dpaa_ops = {
 	.ndo_stop = dpaa_eth_stop,
 	.ndo_tx_timeout = dpaa_tx_timeout,
 	.ndo_get_stats64 = dpaa_get_stats64,
+	.ndo_change_carrier = fixed_phy_change_carrier,
 	.ndo_set_mac_address = dpaa_set_mac_address,
 	.ndo_validate_addr = eth_validate_addr,
 	.ndo_set_rx_mode = dpaa_set_rx_mode,
@@ -2566,7 +2750,8 @@ static inline void dpaa_bp_free_pf(const struct dpaa_bp *bp,
 {
 	dma_addr_t addr = bm_buf_addr(bmb);
 
-	dma_unmap_single(bp->dev, addr, bp->size, DMA_FROM_DEVICE);
+	dma_unmap_page(bp->priv->rx_dma_dev, addr, DPAA_BP_RAW_SIZE,
+		       DMA_FROM_DEVICE);
 
 	skb_free_frag(phys_to_virt(addr));
 }
@@ -2643,8 +2828,6 @@ out_error:
 	return err;
 }
 
-static const struct of_device_id dpaa_match[];
-
 static inline u16 dpaa_get_headroom(struct dpaa_buffer_layout *bl)
 {
 	u16 headroom;
@@ -2662,28 +2845,51 @@ static inline u16 dpaa_get_headroom(struct dpaa_buffer_layout *bl)
 	headroom = (u16)(bl->priv_data_size + DPAA_PARSE_RESULTS_SIZE +
 		DPAA_TIME_STAMP_SIZE + DPAA_HASH_RESULTS_SIZE);
 
-	return DPAA_FD_DATA_ALIGNMENT ? ALIGN(headroom,
-					      DPAA_FD_DATA_ALIGNMENT) :
-					headroom;
+	return ALIGN(headroom, DPAA_FD_DATA_ALIGNMENT);
 }
 
 static int dpaa_eth_probe(struct platform_device *pdev)
 {
-	struct dpaa_bp *dpaa_bps[DPAA_BPS_NUM] = {NULL};
 	struct net_device *net_dev = NULL;
+	struct dpaa_bp *dpaa_bp = NULL;
 	struct dpaa_fq *dpaa_fq, *tmp;
 	struct dpaa_priv *priv = NULL;
 	struct fm_port_fqs port_fqs;
 	struct mac_device *mac_dev;
-	int err = 0, i, channel;
+	int err = 0, channel;
 	struct device *dev;
 
-	/* device used for DMA mapping */
-	dev = pdev->dev.parent;
-	err = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(40));
-	if (err) {
-		dev_err(dev, "dma_coerce_mask_and_coherent() failed\n");
-		return err;
+	dev = &pdev->dev;
+
+	err = bman_is_probed();
+	if (!err)
+		return -EPROBE_DEFER;
+	if (err < 0) {
+		dev_err(dev, "failing probe due to bman probe error\n");
+		return -ENODEV;
+	}
+	err = qman_is_probed();
+	if (!err)
+		return -EPROBE_DEFER;
+	if (err < 0) {
+		dev_err(dev, "failing probe due to qman probe error\n");
+		return -ENODEV;
+	}
+	err = bman_portals_probed();
+	if (!err)
+		return -EPROBE_DEFER;
+	if (err < 0) {
+		dev_err(dev,
+			"failing probe due to bman portals probe error\n");
+		return -ENODEV;
+	}
+	err = qman_portals_probed();
+	if (!err)
+		return -EPROBE_DEFER;
+	if (err < 0) {
+		dev_err(dev,
+			"failing probe due to qman portals probe error\n");
+		return -ENODEV;
 	}
 
 	/* Allocate this early, so we can store relevant information in
@@ -2706,9 +2912,21 @@ static int dpaa_eth_probe(struct platform_device *pdev)
 
 	mac_dev = dpaa_mac_dev_get(pdev);
 	if (IS_ERR(mac_dev)) {
-		dev_err(dev, "dpaa_mac_dev_get() failed\n");
+		netdev_err(net_dev, "dpaa_mac_dev_get() failed\n");
 		err = PTR_ERR(mac_dev);
 		goto free_netdev;
+	}
+
+	/* Devices used for DMA mapping */
+	priv->rx_dma_dev = fman_port_get_device(mac_dev->port[RX]);
+	priv->tx_dma_dev = fman_port_get_device(mac_dev->port[TX]);
+	err = dma_coerce_mask_and_coherent(priv->rx_dma_dev, DMA_BIT_MASK(40));
+	if (!err)
+		err = dma_coerce_mask_and_coherent(priv->tx_dma_dev,
+						   DMA_BIT_MASK(40));
+	if (err) {
+		netdev_err(net_dev, "dma_coerce_mask_and_coherent() failed\n");
+		return err;
 	}
 
 	/* If fsl_fm_max_frm is set to a higher value than the all-common 1500,
@@ -2727,23 +2945,21 @@ static int dpaa_eth_probe(struct platform_device *pdev)
 	priv->buf_layout[TX].priv_data_size = DPAA_TX_PRIV_DATA_SIZE; /* Tx */
 
 	/* bp init */
-	for (i = 0; i < DPAA_BPS_NUM; i++) {
-		dpaa_bps[i] = dpaa_bp_alloc(dev);
-		if (IS_ERR(dpaa_bps[i])) {
-			err = PTR_ERR(dpaa_bps[i]);
-			goto free_dpaa_bps;
-		}
-		/* the raw size of the buffers used for reception */
-		dpaa_bps[i]->raw_size = bpool_buffer_raw_size(i, DPAA_BPS_NUM);
-		/* avoid runtime computations by keeping the usable size here */
-		dpaa_bps[i]->size = dpaa_bp_size(dpaa_bps[i]->raw_size);
-		dpaa_bps[i]->dev = dev;
-
-		err = dpaa_bp_alloc_pool(dpaa_bps[i]);
-		if (err < 0)
-			goto free_dpaa_bps;
-		priv->dpaa_bps[i] = dpaa_bps[i];
+	dpaa_bp = dpaa_bp_alloc(dev);
+	if (IS_ERR(dpaa_bp)) {
+		err = PTR_ERR(dpaa_bp);
+		goto free_dpaa_bps;
 	}
+	/* the raw size of the buffers used for reception */
+	dpaa_bp->raw_size = DPAA_BP_RAW_SIZE;
+	/* avoid runtime computations by keeping the usable size here */
+	dpaa_bp->size = dpaa_bp_size(dpaa_bp->raw_size);
+	dpaa_bp->priv = priv;
+
+	err = dpaa_bp_alloc_pool(dpaa_bp);
+	if (err < 0)
+		goto free_dpaa_bps;
+	priv->dpaa_bp = dpaa_bp;
 
 	INIT_LIST_HEAD(&priv->dpaa_fq_list);
 
@@ -2766,10 +2982,10 @@ static int dpaa_eth_probe(struct platform_device *pdev)
 
 	priv->channel = (u16)channel;
 
-	/* Start a thread that will walk the CPUs with affine portals
+	/* Walk the CPUs with affine portals
 	 * and add this pool channel to each's dequeue mask.
 	 */
-	dpaa_eth_add_channel(priv->channel);
+	dpaa_eth_add_channel(priv->channel, &pdev->dev);
 
 	dpaa_fq_setup(priv, &dpaa_fq_cbs, priv->mac_dev->port[TX]);
 
@@ -2801,7 +3017,7 @@ static int dpaa_eth_probe(struct platform_device *pdev)
 	priv->rx_headroom = dpaa_get_headroom(&priv->buf_layout[RX]);
 
 	/* All real interfaces need their ports initialized */
-	err = dpaa_eth_init_ports(mac_dev, dpaa_bps, DPAA_BPS_NUM, &port_fqs,
+	err = dpaa_eth_init_ports(mac_dev, dpaa_bp, &port_fqs,
 				  &priv->buf_layout[0], dev);
 	if (err)
 		goto free_dpaa_fqs;

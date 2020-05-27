@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * I2C Link Layer for PN544 HCI based Driver
  *
  * Copyright (C) 2012  Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -27,6 +16,7 @@
 #include <linux/nfc.h>
 #include <linux/firmware.h>
 #include <linux/gpio/consumer.h>
+#include <linux/regulator/consumer.h>
 
 #include <asm/unaligned.h>
 
@@ -69,6 +59,14 @@ static const struct acpi_device_id pn544_hci_i2c_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, pn544_hci_i2c_acpi_match);
 
 #define PN544_HCI_I2C_DRIVER_NAME "pn544_hci_i2c"
+
+/* regulator supplies */
+static const char * const pn544_supply_names[] = {
+	"PVDD",  /* Digital Core (1.8V) supply */
+	"VBAT",  /* Analog (2.9V-5.5V) supply */
+};
+
+#define PN544_NUM_SUPPLIES ARRAY_SIZE(pn544_supply_names)
 
 /*
  * Exposed through the 4 most significant bytes
@@ -161,6 +159,7 @@ struct pn544_i2c_phy {
 	struct i2c_client *i2c_dev;
 	struct nfc_hci_dev *hdev;
 
+	struct regulator_bulk_data supplies[PN544_NUM_SUPPLIES];
 	struct gpio_desc *gpiod_en;
 	struct gpio_desc *gpiod_fw;
 
@@ -236,6 +235,7 @@ static void pn544_hci_i2c_platform_init(struct pn544_i2c_phy *phy)
 
 out:
 	gpiod_set_value_cansleep(phy->gpiod_en, !phy->en_polarity);
+	usleep_range(10000, 15000);
 }
 
 static void pn544_hci_i2c_enable_mode(struct pn544_i2c_phy *phy, int run_mode)
@@ -250,8 +250,13 @@ static void pn544_hci_i2c_enable_mode(struct pn544_i2c_phy *phy, int run_mode)
 static int pn544_hci_i2c_enable(void *phy_id)
 {
 	struct pn544_i2c_phy *phy = phy_id;
+	int ret;
 
 	pr_info("%s\n", __func__);
+
+	ret = regulator_bulk_enable(PN544_NUM_SUPPLIES, phy->supplies);
+	if (ret)
+		return ret;
 
 	pn544_hci_i2c_enable_mode(phy, PN544_HCI_MODE);
 
@@ -273,6 +278,8 @@ static void pn544_hci_i2c_disable(void *phy_id)
 
 	gpiod_set_value_cansleep(phy->gpiod_en, !phy->en_polarity);
 	usleep_range(10000, 15000);
+
+	regulator_bulk_disable(PN544_NUM_SUPPLIES, phy->supplies);
 
 	phy->powered = 0;
 }
@@ -380,7 +387,7 @@ static int pn544_hci_i2c_read(struct pn544_i2c_phy *phy, struct sk_buff **skb)
 
 	if ((len < (PN544_HCI_I2C_LLC_MIN_SIZE - 1)) ||
 	    (len > (PN544_HCI_I2C_LLC_MAX_SIZE - 1))) {
-		nfc_err(&client->dev, "invalid len byte\n");
+		nfc_err(&client->dev, "invalid len byte %hhx\n", len);
 		r = -EBADMSG;
 		goto flush;
 	}
@@ -883,7 +890,7 @@ static int pn544_hci_i2c_probe(struct i2c_client *client,
 {
 	struct device *dev = &client->dev;
 	struct pn544_i2c_phy *phy;
-	int r = 0;
+	int r = 0, i;
 
 	dev_dbg(&client->dev, "%s\n", __func__);
 	dev_dbg(&client->dev, "IRQ: %d\n", client->irq);
@@ -907,6 +914,14 @@ static int pn544_hci_i2c_probe(struct i2c_client *client,
 	r = devm_acpi_dev_add_driver_gpios(dev, acpi_pn544_gpios);
 	if (r)
 		dev_dbg(dev, "Unable to add GPIO mapping table\n");
+
+	for (i = 0; i < PN544_NUM_SUPPLIES; i++)
+		phy->supplies[i].supply = pn544_supply_names[i];
+
+	r = devm_regulator_bulk_get(&client->dev, PN544_NUM_SUPPLIES,
+				    phy->supplies);
+	if (r)
+		return r;
 
 	/* Get EN GPIO */
 	phy->gpiod_en = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);

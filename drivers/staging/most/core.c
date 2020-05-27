@@ -2,10 +2,9 @@
 /*
  * core.c - Implementation of core module of MOST Linux driver stack
  *
- * Copyright (C) 2013-2015 Microchip Technology Germany II GmbH & Co. KG
+ * Copyright (C) 2013-2020 Microchip Technology Germany II GmbH & Co. KG
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
@@ -21,25 +20,18 @@
 #include <linux/kthread.h>
 #include <linux/dma-mapping.h>
 #include <linux/idr.h>
-#include <most/core.h>
+
+#include "most.h"
 
 #define MAX_CHANNELS	64
 #define STRING_SIZE	80
 
 static struct ida mdev_id;
 static int dummy_num_buffers;
-
-static struct mostcore {
-	struct device dev;
-	struct device_driver drv;
-	struct bus_type bus;
-	struct list_head comp_list;
-} mc;
-
-#define to_driver(d) container_of(d, struct mostcore, drv)
+static struct list_head comp_list;
 
 struct pipe {
-	struct core_component *comp;
+	struct most_component *comp;
 	int refs;
 	int num_buffers;
 };
@@ -52,7 +44,7 @@ struct most_channel {
 	u16 channel_id;
 	char name[STRING_SIZE];
 	bool is_poisoned;
-	struct mutex start_mutex;
+	struct mutex start_mutex; /* channel activation synchronization */
 	struct mutex nq_mutex; /* nq thread synchronization */
 	int is_starving;
 	struct most_interface *iface;
@@ -60,7 +52,7 @@ struct most_channel {
 	bool keep_mbo;
 	bool enqueue_halt;
 	struct list_head fifo;
-	spinlock_t fifo_lock;
+	spinlock_t fifo_lock; /* fifo access synchronization */
 	struct list_head halt_fifo;
 	struct list_head list;
 	struct pipe pipe0;
@@ -84,11 +76,11 @@ static const struct {
 	int most_ch_data_type;
 	const char *name;
 } ch_data_type[] = {
-	{ MOST_CH_CONTROL, "control\n" },
-	{ MOST_CH_ASYNC, "async\n" },
-	{ MOST_CH_SYNC, "sync\n" },
-	{ MOST_CH_ISOC, "isoc\n"},
-	{ MOST_CH_ISOC, "isoc_avp\n"},
+	{ MOST_CH_CONTROL, "control" },
+	{ MOST_CH_ASYNC, "async" },
+	{ MOST_CH_SYNC, "sync" },
+	{ MOST_CH_ISOC, "isoc"},
+	{ MOST_CH_ISOC, "isoc_avp"},
 };
 
 /**
@@ -111,8 +103,10 @@ static void most_free_mbo_coherent(struct mbo *mbo)
 	struct most_channel *c = mbo->context;
 	u16 const coherent_buf_size = c->cfg.buffer_size + c->cfg.extra_len;
 
-	dma_free_coherent(NULL, coherent_buf_size, mbo->virt_address,
-			  mbo->bus_address);
+	if (c->iface->dma_free)
+		c->iface->dma_free(mbo, coherent_buf_size);
+	else
+		kfree(mbo->virt_address);
 	kfree(mbo);
 	if (atomic_sub_and_test(1, &c->mbo_ref))
 		complete(&c->cleanup);
@@ -149,7 +143,7 @@ static void flush_channel_fifos(struct most_channel *c)
 	spin_unlock_irqrestore(&c->fifo_lock, hf_flags);
 
 	if (unlikely((!list_empty(&c->fifo) || !list_empty(&c->halt_fifo))))
-		pr_info("WARN: fifo | trash fifo not empty\n");
+		dev_warn(&c->dev, "Channel or trash fifo not empty\n");
 }
 
 /**
@@ -270,19 +264,6 @@ static ssize_t set_number_of_buffers_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", c->cfg.num_buffers);
 }
 
-static ssize_t set_number_of_buffers_store(struct device *dev,
-					   struct device_attribute *attr,
-					   const char *buf,
-					   size_t count)
-{
-	struct most_channel *c = to_channel(dev);
-	int ret = kstrtou16(buf, 0, &c->cfg.num_buffers);
-
-	if (ret)
-		return ret;
-	return count;
-}
-
 static ssize_t set_buffer_size_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
@@ -290,19 +271,6 @@ static ssize_t set_buffer_size_show(struct device *dev,
 	struct most_channel *c = to_channel(dev);
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", c->cfg.buffer_size);
-}
-
-static ssize_t set_buffer_size_store(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf,
-				     size_t count)
-{
-	struct most_channel *c = to_channel(dev);
-	int ret = kstrtou16(buf, 0, &c->cfg.buffer_size);
-
-	if (ret)
-		return ret;
-	return count;
 }
 
 static ssize_t set_direction_show(struct device *dev,
@@ -318,28 +286,6 @@ static ssize_t set_direction_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "unconfigured\n");
 }
 
-static ssize_t set_direction_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf,
-				   size_t count)
-{
-	struct most_channel *c = to_channel(dev);
-
-	if (!strcmp(buf, "dir_rx\n")) {
-		c->cfg.direction = MOST_CH_RX;
-	} else if (!strcmp(buf, "rx\n")) {
-		c->cfg.direction = MOST_CH_RX;
-	} else if (!strcmp(buf, "dir_tx\n")) {
-		c->cfg.direction = MOST_CH_TX;
-	} else if (!strcmp(buf, "tx\n")) {
-		c->cfg.direction = MOST_CH_TX;
-	} else {
-		pr_info("WARN: invalid attribute settings\n");
-		return -EINVAL;
-	}
-	return count;
-}
-
 static ssize_t set_datatype_show(struct device *dev,
 				 struct device_attribute *attr,
 				 char *buf)
@@ -349,31 +295,10 @@ static ssize_t set_datatype_show(struct device *dev,
 
 	for (i = 0; i < ARRAY_SIZE(ch_data_type); i++) {
 		if (c->cfg.data_type & ch_data_type[i].most_ch_data_type)
-			return snprintf(buf, PAGE_SIZE, ch_data_type[i].name);
+			return snprintf(buf, PAGE_SIZE, "%s",
+					ch_data_type[i].name);
 	}
 	return snprintf(buf, PAGE_SIZE, "unconfigured\n");
-}
-
-static ssize_t set_datatype_store(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf,
-				  size_t count)
-{
-	int i;
-	struct most_channel *c = to_channel(dev);
-
-	for (i = 0; i < ARRAY_SIZE(ch_data_type); i++) {
-		if (!strcmp(buf, ch_data_type[i].name)) {
-			c->cfg.data_type = ch_data_type[i].most_ch_data_type;
-			break;
-		}
-	}
-
-	if (i == ARRAY_SIZE(ch_data_type)) {
-		pr_info("WARN: invalid attribute settings\n");
-		return -EINVAL;
-	}
-	return count;
 }
 
 static ssize_t set_subbuffer_size_show(struct device *dev,
@@ -385,19 +310,6 @@ static ssize_t set_subbuffer_size_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", c->cfg.subbuffer_size);
 }
 
-static ssize_t set_subbuffer_size_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf,
-					size_t count)
-{
-	struct most_channel *c = to_channel(dev);
-	int ret = kstrtou16(buf, 0, &c->cfg.subbuffer_size);
-
-	if (ret)
-		return ret;
-	return count;
-}
-
 static ssize_t set_packets_per_xact_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
@@ -407,17 +319,30 @@ static ssize_t set_packets_per_xact_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", c->cfg.packets_per_xact);
 }
 
-static ssize_t set_packets_per_xact_store(struct device *dev,
-					  struct device_attribute *attr,
-					  const char *buf,
-					  size_t count)
+static ssize_t set_dbr_size_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
 {
 	struct most_channel *c = to_channel(dev);
-	int ret = kstrtou16(buf, 0, &c->cfg.packets_per_xact);
 
-	if (ret)
-		return ret;
-	return count;
+	return snprintf(buf, PAGE_SIZE, "%d\n", c->cfg.dbr_size);
+}
+
+#define to_dev_attr(a) container_of(a, struct device_attribute, attr)
+static umode_t channel_attr_is_visible(struct kobject *kobj,
+				       struct attribute *attr, int index)
+{
+	struct device_attribute *dev_attr = to_dev_attr(attr);
+	struct device *dev = kobj_to_dev(kobj);
+	struct most_channel *c = to_channel(dev);
+
+	if (!strcmp(dev_attr->attr.name, "set_dbr_size") &&
+	    (c->iface->interface != ITYPE_MEDIALB_DIM2))
+		return 0;
+	if (!strcmp(dev_attr->attr.name, "set_packets_per_xact") &&
+	    (c->iface->interface != ITYPE_USB))
+		return 0;
+
+	return attr->mode;
 }
 
 #define DEV_ATTR(_name)  (&dev_attr_##_name.attr)
@@ -429,12 +354,13 @@ static DEVICE_ATTR_RO(number_of_stream_buffers);
 static DEVICE_ATTR_RO(size_of_stream_buffer);
 static DEVICE_ATTR_RO(size_of_packet_buffer);
 static DEVICE_ATTR_RO(channel_starving);
-static DEVICE_ATTR_RW(set_buffer_size);
-static DEVICE_ATTR_RW(set_number_of_buffers);
-static DEVICE_ATTR_RW(set_direction);
-static DEVICE_ATTR_RW(set_datatype);
-static DEVICE_ATTR_RW(set_subbuffer_size);
-static DEVICE_ATTR_RW(set_packets_per_xact);
+static DEVICE_ATTR_RO(set_buffer_size);
+static DEVICE_ATTR_RO(set_number_of_buffers);
+static DEVICE_ATTR_RO(set_direction);
+static DEVICE_ATTR_RO(set_datatype);
+static DEVICE_ATTR_RO(set_subbuffer_size);
+static DEVICE_ATTR_RO(set_packets_per_xact);
+static DEVICE_ATTR_RO(set_dbr_size);
 
 static struct attribute *channel_attrs[] = {
 	DEV_ATTR(available_directions),
@@ -450,11 +376,13 @@ static struct attribute *channel_attrs[] = {
 	DEV_ATTR(set_datatype),
 	DEV_ATTR(set_subbuffer_size),
 	DEV_ATTR(set_packets_per_xact),
+	DEV_ATTR(set_dbr_size),
 	NULL,
 };
 
 static struct attribute_group channel_attr_group = {
 	.attrs = channel_attrs,
+	.is_visible = channel_attr_is_visible,
 };
 
 static const struct attribute_group *channel_attr_groups[] = {
@@ -466,7 +394,7 @@ static ssize_t description_show(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
-	struct most_interface *iface = to_most_interface(dev);
+	struct most_interface *iface = dev_get_drvdata(dev);
 
 	return snprintf(buf, PAGE_SIZE, "%s\n", iface->description);
 }
@@ -475,7 +403,7 @@ static ssize_t interface_show(struct device *dev,
 			      struct device_attribute *attr,
 			      char *buf)
 {
-	struct most_interface *iface = to_most_interface(dev);
+	struct most_interface *iface = dev_get_drvdata(dev);
 
 	switch (iface->interface) {
 	case ITYPE_LOOPBACK:
@@ -518,11 +446,11 @@ static const struct attribute_group *interface_attr_groups[] = {
 	NULL,
 };
 
-static struct core_component *match_component(char *name)
+static struct most_component *match_component(char *name)
 {
-	struct core_component *comp;
+	struct most_component *comp;
 
-	list_for_each_entry(comp, &mc.comp_list, list) {
+	list_for_each_entry(comp, &comp_list, list) {
 		if (!strcmp(comp->name, name))
 			return comp;
 	}
@@ -540,7 +468,7 @@ static int print_links(struct device *dev, void *data)
 	int offs = d->offs;
 	char *buf = d->buf;
 	struct most_channel *c;
-	struct most_interface *iface = to_most_interface(dev);
+	struct most_interface *iface = dev_get_drvdata(dev);
 
 	list_for_each_entry(c, &iface->p->channel_list, list) {
 		if (c->pipe0.comp) {
@@ -548,7 +476,7 @@ static int print_links(struct device *dev, void *data)
 					 PAGE_SIZE - offs,
 					 "%s:%s:%s\n",
 					 c->pipe0.comp->name,
-					 dev_name(&iface->dev),
+					 dev_name(iface->dev),
 					 dev_name(&c->dev));
 		}
 		if (c->pipe1.comp) {
@@ -556,7 +484,7 @@ static int print_links(struct device *dev, void *data)
 					 PAGE_SIZE - offs,
 					 "%s:%s:%s\n",
 					 c->pipe1.comp->name,
-					 dev_name(&iface->dev),
+					 dev_name(iface->dev),
 					 dev_name(&c->dev));
 		}
 	}
@@ -564,72 +492,37 @@ static int print_links(struct device *dev, void *data)
 	return 0;
 }
 
+static int most_match(struct device *dev, struct device_driver *drv)
+{
+	if (!strcmp(dev_name(dev), "most"))
+		return 0;
+	else
+		return 1;
+}
+
+static struct bus_type mostbus = {
+	.name = "most",
+	.match = most_match,
+};
+
 static ssize_t links_show(struct device_driver *drv, char *buf)
 {
 	struct show_links_data d = { .buf = buf };
 
-	bus_for_each_dev(&mc.bus, NULL, &d, print_links);
+	bus_for_each_dev(&mostbus, NULL, &d, print_links);
 	return d.offs;
 }
 
 static ssize_t components_show(struct device_driver *drv, char *buf)
 {
-	struct core_component *comp;
+	struct most_component *comp;
 	int offs = 0;
 
-	list_for_each_entry(comp, &mc.comp_list, list) {
+	list_for_each_entry(comp, &comp_list, list) {
 		offs += snprintf(buf + offs, PAGE_SIZE - offs, "%s\n",
 				 comp->name);
 	}
 	return offs;
-}
-/**
- * split_string - parses buf and extracts ':' separated substrings.
- *
- * @buf: complete string from attribute 'add_channel'
- * @a: storage for 1st substring (=interface name)
- * @b: storage for 2nd substring (=channel name)
- * @c: storage for 3rd substring (=component name)
- * @d: storage optional 4th substring (=user defined name)
- *
- * Examples:
- *
- * Input: "mdev0:ch6:cdev:my_channel\n" or
- *        "mdev0:ch6:cdev:my_channel"
- *
- * Output: *a -> "mdev0", *b -> "ch6", *c -> "cdev" *d -> "my_channel"
- *
- * Input: "mdev1:ep81:cdev\n"
- * Output: *a -> "mdev1", *b -> "ep81", *c -> "cdev" *d -> ""
- *
- * Input: "mdev1:ep81"
- * Output: *a -> "mdev1", *b -> "ep81", *c -> "cdev" *d == NULL
- */
-static int split_string(char *buf, char **a, char **b, char **c, char **d)
-{
-	*a = strsep(&buf, ":");
-	if (!*a)
-		return -EIO;
-
-	*b = strsep(&buf, ":\n");
-	if (!*b)
-		return -EIO;
-
-	*c = strsep(&buf, ":\n");
-	if (!*c)
-		return -EIO;
-
-	if (d)
-		*d = strsep(&buf, ":\n");
-
-	return 0;
-}
-
-static int match_bus_dev(struct device *dev, void *data)
-{
-	char *mdev_name = data;
-
-	return !strcmp(dev_name(dev), mdev_name);
 }
 
 /**
@@ -643,10 +536,11 @@ static struct most_channel *get_channel(char *mdev, char *mdev_ch)
 	struct most_interface *iface;
 	struct most_channel *c, *tmp;
 
-	dev = bus_find_device(&mc.bus, NULL, mdev, match_bus_dev);
+	dev = bus_find_device_by_name(&mostbus, NULL, mdev);
 	if (!dev)
 		return NULL;
-	iface = to_most_interface(dev);
+	put_device(dev);
+	iface = dev_get_drvdata(dev);
 	list_for_each_entry_safe(c, tmp, &iface->p->channel_list, list) {
 		if (!strcmp(dev_name(&c->dev), mdev_ch))
 			return c;
@@ -656,11 +550,12 @@ static struct most_channel *get_channel(char *mdev, char *mdev_ch)
 
 static
 inline int link_channel_to_component(struct most_channel *c,
-				     struct core_component *comp,
+				     struct most_component *comp,
+				     char *name,
 				     char *comp_param)
 {
 	int ret;
-	struct core_component **comp_ptr;
+	struct most_component **comp_ptr;
 
 	if (!c->pipe0.comp)
 		comp_ptr = &c->pipe0.comp;
@@ -670,7 +565,8 @@ inline int link_channel_to_component(struct most_channel *c,
 		return -ENOSPC;
 
 	*comp_ptr = comp;
-	ret = comp->probe_channel(c->iface, c->channel_id, &c->cfg, comp_param);
+	ret = comp->probe_channel(c->iface, c->channel_id, &c->cfg, name,
+				  comp_param);
 	if (ret) {
 		*comp_ptr = NULL;
 		return ret;
@@ -678,91 +574,124 @@ inline int link_channel_to_component(struct most_channel *c,
 	return 0;
 }
 
-/**
- * add_link_store - store function for add_link attribute
- * @drv: device driver
- * @buf: buffer
- * @len: buffer length
- *
- * This parses the string given by buf and splits it into
- * four substrings. Note: last substring is optional. In case a cdev
- * component is loaded the optional 4th substring will make up the name of
- * device node in the /dev directory. If omitted, the device node will
- * inherit the channel's name within sysfs.
- *
- * Searches for (device, channel) pair and probes the component
- *
- * Example:
- * (1) echo "mdev0:ch6:cdev:my_rxchannel" >add_link
- * (2) echo "mdev1:ep81:cdev" >add_link
- *
- * (1) would create the device node /dev/my_rxchannel
- * (2) would create the device node /dev/mdev1-ep81
- */
-static ssize_t add_link_store(struct device_driver *drv,
-			      const char *buf,
-			      size_t len)
+int most_set_cfg_buffer_size(char *mdev, char *mdev_ch, u16 val)
 {
-	struct most_channel *c;
-	struct core_component *comp;
-	char buffer[STRING_SIZE];
-	char *mdev;
-	char *mdev_ch;
-	char *comp_name;
-	char *comp_param;
-	char devnod_buf[STRING_SIZE];
-	int ret;
-	size_t max_len = min_t(size_t, len + 1, STRING_SIZE);
+	struct most_channel *c = get_channel(mdev, mdev_ch);
 
-	strlcpy(buffer, buf, max_len);
-	ret = split_string(buffer, &mdev, &mdev_ch, &comp_name, &comp_param);
-	if (ret)
-		return ret;
+	if (!c)
+		return -ENODEV;
+	c->cfg.buffer_size = val;
+	return 0;
+}
+
+int most_set_cfg_subbuffer_size(char *mdev, char *mdev_ch, u16 val)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	c->cfg.subbuffer_size = val;
+	return 0;
+}
+
+int most_set_cfg_dbr_size(char *mdev, char *mdev_ch, u16 val)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	c->cfg.dbr_size = val;
+	return 0;
+}
+
+int most_set_cfg_num_buffers(char *mdev, char *mdev_ch, u16 val)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	c->cfg.num_buffers = val;
+	return 0;
+}
+
+int most_set_cfg_datatype(char *mdev, char *mdev_ch, char *buf)
+{
+	int i;
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	for (i = 0; i < ARRAY_SIZE(ch_data_type); i++) {
+		if (!strcmp(buf, ch_data_type[i].name)) {
+			c->cfg.data_type = ch_data_type[i].most_ch_data_type;
+			break;
+		}
+	}
+
+	if (i == ARRAY_SIZE(ch_data_type))
+		dev_warn(&c->dev, "Invalid attribute settings\n");
+	return 0;
+}
+
+int most_set_cfg_direction(char *mdev, char *mdev_ch, char *buf)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	if (!strcmp(buf, "dir_rx")) {
+		c->cfg.direction = MOST_CH_RX;
+	} else if (!strcmp(buf, "rx")) {
+		c->cfg.direction = MOST_CH_RX;
+	} else if (!strcmp(buf, "dir_tx")) {
+		c->cfg.direction = MOST_CH_TX;
+	} else if (!strcmp(buf, "tx")) {
+		c->cfg.direction = MOST_CH_TX;
+	} else {
+		dev_err(&c->dev, "Invalid direction\n");
+		return -ENODATA;
+	}
+	return 0;
+}
+
+int most_set_cfg_packets_xact(char *mdev, char *mdev_ch, u16 val)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+
+	if (!c)
+		return -ENODEV;
+	c->cfg.packets_per_xact = val;
+	return 0;
+}
+
+int most_cfg_complete(char *comp_name)
+{
+	struct most_component *comp;
+
 	comp = match_component(comp_name);
 	if (!comp)
 		return -ENODEV;
-	if (!comp_param || *comp_param == 0) {
-		snprintf(devnod_buf, sizeof(devnod_buf), "%s-%s", mdev,
-			 mdev_ch);
-		comp_param = devnod_buf;
-	}
 
-	c = get_channel(mdev, mdev_ch);
-	if (!c)
-		return -ENODEV;
-
-	ret = link_channel_to_component(c, comp, comp_param);
-	if (ret)
-		return ret;
-	return len;
+	return comp->cfg_complete();
 }
 
-/**
- * remove_link_store - store function for remove_link attribute
- * @drv: device driver
- * @buf: buffer
- * @len: buffer length
- *
- * Example:
- * echo "mdev0:ep81" >remove_link
- */
-static ssize_t remove_link_store(struct device_driver *drv,
-				 const char *buf,
-				 size_t len)
+int most_add_link(char *mdev, char *mdev_ch, char *comp_name, char *link_name,
+		  char *comp_param)
+{
+	struct most_channel *c = get_channel(mdev, mdev_ch);
+	struct most_component *comp = match_component(comp_name);
+
+	if (!c || !comp)
+		return -ENODEV;
+
+	return link_channel_to_component(c, comp, link_name, comp_param);
+}
+
+int most_remove_link(char *mdev, char *mdev_ch, char *comp_name)
 {
 	struct most_channel *c;
-	struct core_component *comp;
-	char buffer[STRING_SIZE];
-	char *mdev;
-	char *mdev_ch;
-	char *comp_name;
-	int ret;
-	size_t max_len = min_t(size_t, len + 1, STRING_SIZE);
+	struct most_component *comp;
 
-	strlcpy(buffer, buf, max_len);
-	ret = split_string(buffer, &mdev, &mdev_ch, &comp_name, NULL);
-	if (ret)
-		return ret;
 	comp = match_component(comp_name);
 	if (!comp)
 		return -ENODEV;
@@ -776,21 +705,17 @@ static ssize_t remove_link_store(struct device_driver *drv,
 		c->pipe0.comp = NULL;
 	if (c->pipe1.comp == comp)
 		c->pipe1.comp = NULL;
-	return len;
+	return 0;
 }
 
 #define DRV_ATTR(_name)  (&driver_attr_##_name.attr)
 
 static DRIVER_ATTR_RO(links);
 static DRIVER_ATTR_RO(components);
-static DRIVER_ATTR_WO(add_link);
-static DRIVER_ATTR_WO(remove_link);
 
 static struct attribute *mc_attrs[] = {
 	DRV_ATTR(links),
 	DRV_ATTR(components),
-	DRV_ATTR(add_link),
-	DRV_ATTR(remove_link),
 	NULL,
 };
 
@@ -803,13 +728,11 @@ static const struct attribute_group *mc_attr_groups[] = {
 	NULL,
 };
 
-static int most_match(struct device *dev, struct device_driver *drv)
-{
-	if (!strcmp(dev_name(dev), "most"))
-		return 0;
-	else
-		return 1;
-}
+static struct device_driver mostbus_driver = {
+	.name = "most_core",
+	.bus = &mostbus,
+	.groups = mc_attr_groups,
+};
 
 static inline void trash_mbo(struct mbo *mbo)
 {
@@ -876,7 +799,7 @@ static int hdm_enqueue_thread(void *data)
 		mutex_unlock(&c->nq_mutex);
 
 		if (unlikely(ret)) {
-			pr_err("hdm enqueue failed\n");
+			dev_err(&c->dev, "Buffer enqueue failed\n");
 			nq_hdm_mbo(mbo);
 			c->hdm_enqueue_task = NULL;
 			return 0;
@@ -915,7 +838,6 @@ static void arm_mbo(struct mbo *mbo)
 	unsigned long flags;
 	struct most_channel *c;
 
-	BUG_ON((!mbo) || (!mbo->context));
 	c = mbo->context;
 
 	if (c->is_poisoned) {
@@ -952,45 +874,49 @@ static int arm_mbo_chain(struct most_channel *c, int dir,
 			 void (*compl)(struct mbo *))
 {
 	unsigned int i;
-	int retval;
 	struct mbo *mbo;
+	unsigned long flags;
 	u32 coherent_buf_size = c->cfg.buffer_size + c->cfg.extra_len;
 
 	atomic_set(&c->mbo_nq_level, 0);
 
 	for (i = 0; i < c->cfg.num_buffers; i++) {
 		mbo = kzalloc(sizeof(*mbo), GFP_KERNEL);
-		if (!mbo) {
-			retval = i;
-			goto _exit;
-		}
+		if (!mbo)
+			goto flush_fifos;
+
 		mbo->context = c;
 		mbo->ifp = c->iface;
 		mbo->hdm_channel_id = c->channel_id;
-		mbo->virt_address = dma_alloc_coherent(NULL,
-						       coherent_buf_size,
-						       &mbo->bus_address,
-						       GFP_KERNEL);
-		if (!mbo->virt_address) {
-			pr_info("WARN: No DMA coherent buffer.\n");
-			retval = i;
-			goto _error1;
+		if (c->iface->dma_alloc) {
+			mbo->virt_address =
+				c->iface->dma_alloc(mbo, coherent_buf_size);
+		} else {
+			mbo->virt_address =
+				kzalloc(coherent_buf_size, GFP_KERNEL);
 		}
+		if (!mbo->virt_address)
+			goto release_mbo;
+
 		mbo->complete = compl;
 		mbo->num_buffers_ptr = &dummy_num_buffers;
 		if (dir == MOST_CH_RX) {
 			nq_hdm_mbo(mbo);
 			atomic_inc(&c->mbo_nq_level);
 		} else {
-			arm_mbo(mbo);
+			spin_lock_irqsave(&c->fifo_lock, flags);
+			list_add_tail(&mbo->list, &c->fifo);
+			spin_unlock_irqrestore(&c->fifo_lock, flags);
 		}
 	}
-	return i;
+	return c->cfg.num_buffers;
 
-_error1:
+release_mbo:
 	kfree(mbo);
-_exit:
-	return retval;
+
+flush_fifos:
+	flush_channel_fifos(c);
+	return 0;
 }
 
 /**
@@ -1000,7 +926,7 @@ _exit:
 void most_submit_mbo(struct mbo *mbo)
 {
 	if (WARN_ONCE(!mbo || !mbo->context,
-		      "bad mbo or missing channel reference\n"))
+		      "Bad buffer or missing channel reference\n"))
 		return;
 
 	nq_hdm_mbo(mbo);
@@ -1018,11 +944,7 @@ static void most_write_completion(struct mbo *mbo)
 {
 	struct most_channel *c;
 
-	BUG_ON((!mbo) || (!mbo->context));
-
 	c = mbo->context;
-	if (mbo->status == MBO_E_INVAL)
-		pr_info("WARN: Tx MBO status: invalid\n");
 	if (unlikely(c->is_poisoned || (mbo->status == MBO_E_CLOSE)))
 		trash_mbo(mbo);
 	else
@@ -1030,7 +952,7 @@ static void most_write_completion(struct mbo *mbo)
 }
 
 int channel_has_mbo(struct most_interface *iface, int id,
-		    struct core_component *comp)
+		    struct most_component *comp)
 {
 	struct most_channel *c = iface->p->channel[id];
 	unsigned long flags;
@@ -1061,7 +983,7 @@ EXPORT_SYMBOL_GPL(channel_has_mbo);
  * Returns a pointer to MBO on success or NULL otherwise.
  */
 struct mbo *most_get_mbo(struct most_interface *iface, int id,
-			 struct core_component *comp)
+			 struct most_component *comp)
 {
 	struct mbo *mbo;
 	struct most_channel *c;
@@ -1167,7 +1089,7 @@ static void most_read_completion(struct mbo *mbo)
  * Returns 0 on success or error code otherwise.
  */
 int most_start_channel(struct most_interface *iface, int id,
-		       struct core_component *comp)
+		       struct most_component *comp)
 {
 	int num_buffer;
 	int ret;
@@ -1181,16 +1103,16 @@ int most_start_channel(struct most_interface *iface, int id,
 		goto out; /* already started by another component */
 
 	if (!try_module_get(iface->mod)) {
-		pr_info("failed to acquire HDM lock\n");
+		dev_err(&c->dev, "Failed to acquire HDM lock\n");
 		mutex_unlock(&c->start_mutex);
 		return -ENOLCK;
 	}
 
 	c->cfg.extra_len = 0;
 	if (c->iface->configure(c->iface, c->channel_id, &c->cfg)) {
-		pr_info("channel configuration failed. Go check settings...\n");
+		dev_err(&c->dev, "Channel configuration failed. Go check settings...\n");
 		ret = -EINVAL;
-		goto error;
+		goto err_put_module;
 	}
 
 	init_waitqueue_head(&c->hdm_fifo_wq);
@@ -1202,14 +1124,13 @@ int most_start_channel(struct most_interface *iface, int id,
 		num_buffer = arm_mbo_chain(c, c->cfg.direction,
 					   most_write_completion);
 	if (unlikely(!num_buffer)) {
-		pr_info("failed to allocate memory\n");
 		ret = -ENOMEM;
-		goto error;
+		goto err_put_module;
 	}
 
 	ret = run_enqueue_thread(c, id);
 	if (ret)
-		goto error;
+		goto err_put_module;
 
 	c->is_starving = 0;
 	c->pipe0.num_buffers = c->cfg.num_buffers / 2;
@@ -1224,7 +1145,7 @@ out:
 	mutex_unlock(&c->start_mutex);
 	return 0;
 
-error:
+err_put_module:
 	module_put(iface->mod);
 	mutex_unlock(&c->start_mutex);
 	return ret;
@@ -1238,7 +1159,7 @@ EXPORT_SYMBOL_GPL(most_start_channel);
  * @comp: driver component
  */
 int most_stop_channel(struct most_interface *iface, int id,
-		      struct core_component *comp)
+		      struct most_component *comp)
 {
 	struct most_channel *c;
 
@@ -1263,8 +1184,8 @@ int most_stop_channel(struct most_interface *iface, int id,
 
 	c->is_poisoned = true;
 	if (c->iface->poison_channel(c->iface, c->channel_id)) {
-		pr_err("Cannot stop channel %d of mdev %s\n", c->channel_id,
-		       c->iface->description);
+		dev_err(&c->dev, "Failed to stop channel %d of interface %s\n", c->channel_id,
+			c->iface->description);
 		mutex_unlock(&c->start_mutex);
 		return -EAGAIN;
 	}
@@ -1273,7 +1194,7 @@ int most_stop_channel(struct most_interface *iface, int id,
 
 #ifdef CMPL_INTERRUPTIBLE
 	if (wait_for_completion_interruptible(&c->cleanup)) {
-		pr_info("Interrupted while clean up ch %d\n", c->channel_id);
+		dev_err(&c->dev, "Interrupted while cleaning up channel %d\n", c->channel_id);
 		mutex_unlock(&c->start_mutex);
 		return -EINTR;
 	}
@@ -1296,14 +1217,13 @@ EXPORT_SYMBOL_GPL(most_stop_channel);
  * most_register_component - registers a driver component with the core
  * @comp: driver component
  */
-int most_register_component(struct core_component *comp)
+int most_register_component(struct most_component *comp)
 {
 	if (!comp) {
 		pr_err("Bad component\n");
 		return -EINVAL;
 	}
-	list_add_tail(&comp->list, &mc.comp_list);
-	pr_info("registered new core component %s\n", comp->name);
+	list_add_tail(&comp->list, &comp_list);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(most_register_component);
@@ -1312,9 +1232,9 @@ static int disconnect_channels(struct device *dev, void *data)
 {
 	struct most_interface *iface;
 	struct most_channel *c, *tmp;
-	struct core_component *comp = data;
+	struct most_component *comp = data;
 
-	iface = to_most_interface(dev);
+	iface = dev_get_drvdata(dev);
 	list_for_each_entry_safe(c, tmp, &iface->p->channel_list, list) {
 		if (c->pipe0.comp == comp || c->pipe1.comp == comp)
 			comp->disconnect_channel(c->iface, c->channel_id);
@@ -1330,28 +1250,24 @@ static int disconnect_channels(struct device *dev, void *data)
  * most_deregister_component - deregisters a driver component with the core
  * @comp: driver component
  */
-int most_deregister_component(struct core_component *comp)
+int most_deregister_component(struct most_component *comp)
 {
 	if (!comp) {
 		pr_err("Bad component\n");
 		return -EINVAL;
 	}
 
-	bus_for_each_dev(&mc.bus, NULL, comp, disconnect_channels);
+	bus_for_each_dev(&mostbus, NULL, comp, disconnect_channels);
 	list_del(&comp->list);
-	pr_info("deregistering component %s\n", comp->name);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(most_deregister_component);
 
-static void release_interface(struct device *dev)
-{
-	pr_info("releasing interface dev %s...\n", dev_name(dev));
-}
-
 static void release_channel(struct device *dev)
 {
-	pr_info("releasing channel dev %s...\n", dev_name(dev));
+	struct most_channel *c = to_channel(dev);
+
+	kfree(c);
 }
 
 /**
@@ -1369,34 +1285,32 @@ int most_register_interface(struct most_interface *iface)
 
 	if (!iface || !iface->enqueue || !iface->configure ||
 	    !iface->poison_channel || (iface->num_channels > MAX_CHANNELS)) {
-		pr_err("Bad interface or channel overflow\n");
+		dev_err(iface->dev, "Bad interface or channel overflow\n");
 		return -EINVAL;
 	}
 
 	id = ida_simple_get(&mdev_id, 0, 0, GFP_KERNEL);
 	if (id < 0) {
-		pr_info("Failed to alloc mdev ID\n");
+		dev_err(iface->dev, "Failed to allocate device ID\n");
 		return id;
 	}
 
 	iface->p = kzalloc(sizeof(*iface->p), GFP_KERNEL);
 	if (!iface->p) {
-		pr_info("Failed to allocate interface instance\n");
 		ida_simple_remove(&mdev_id, id);
 		return -ENOMEM;
 	}
 
 	INIT_LIST_HEAD(&iface->p->channel_list);
 	iface->p->dev_id = id;
-	snprintf(iface->p->name, STRING_SIZE, "mdev%d", id);
-	iface->dev.init_name = iface->p->name;
-	iface->dev.bus = &mc.bus;
-	iface->dev.parent = &mc.dev;
-	iface->dev.groups = interface_attr_groups;
-	iface->dev.release = release_interface;
-	if (device_register(&iface->dev)) {
-		pr_err("registering iface->dev failed\n");
+	strscpy(iface->p->name, iface->description, sizeof(iface->p->name));
+	iface->dev->bus = &mostbus;
+	iface->dev->groups = interface_attr_groups;
+	dev_set_drvdata(iface->dev, iface);
+	if (device_register(iface->dev)) {
+		dev_err(iface->dev, "Failed to register interface device\n");
 		kfree(iface->p);
+		put_device(iface->dev);
 		ida_simple_remove(&mdev_id, id);
 		return -ENOMEM;
 	}
@@ -1406,19 +1320,15 @@ int most_register_interface(struct most_interface *iface)
 
 		c = kzalloc(sizeof(*c), GFP_KERNEL);
 		if (!c)
-			goto free_instance;
+			goto err_free_resources;
 		if (!name_suffix)
 			snprintf(c->name, STRING_SIZE, "ch%d", i);
 		else
 			snprintf(c->name, STRING_SIZE, "%s", name_suffix);
 		c->dev.init_name = c->name;
-		c->dev.parent = &iface->dev;
+		c->dev.parent = iface->dev;
 		c->dev.groups = channel_attr_groups;
 		c->dev.release = release_channel;
-		if (device_register(&c->dev)) {
-			pr_err("registering c->dev failed\n");
-			goto free_instance_nodev;
-		}
 		iface->p->channel[i] = c;
 		c->is_starving = 0;
 		c->iface = iface;
@@ -1441,22 +1351,24 @@ int most_register_interface(struct most_interface *iface)
 		mutex_init(&c->start_mutex);
 		mutex_init(&c->nq_mutex);
 		list_add_tail(&c->list, &iface->p->channel_list);
+		if (device_register(&c->dev)) {
+			dev_err(&c->dev, "Failed to register channel device\n");
+			goto err_free_most_channel;
+		}
 	}
-	pr_info("registered new device mdev%d (%s)\n",
-		id, iface->description);
+	most_interface_register_notify(iface->description);
 	return 0;
 
-free_instance_nodev:
-	kfree(c);
+err_free_most_channel:
+	put_device(&c->dev);
 
-free_instance:
+err_free_resources:
 	while (i > 0) {
 		c = iface->p->channel[--i];
 		device_unregister(&c->dev);
-		kfree(c);
 	}
 	kfree(iface->p);
-	device_unregister(&iface->dev);
+	device_unregister(iface->dev);
 	ida_simple_remove(&mdev_id, id);
 	return -ENOMEM;
 }
@@ -1474,7 +1386,6 @@ void most_deregister_interface(struct most_interface *iface)
 	int i;
 	struct most_channel *c;
 
-	pr_info("deregistering device %s (%s)\n", dev_name(&iface->dev), iface->description);
 	for (i = 0; i < iface->num_channels; i++) {
 		c = iface->p->channel[i];
 		if (c->pipe0.comp)
@@ -1487,12 +1398,11 @@ void most_deregister_interface(struct most_interface *iface)
 		c->pipe1.comp = NULL;
 		list_del(&c->list);
 		device_unregister(&c->dev);
-		kfree(c);
 	}
 
 	ida_simple_remove(&mdev_id, iface->p->dev_id);
 	kfree(iface->p);
-	device_unregister(&iface->dev);
+	device_unregister(iface->dev);
 }
 EXPORT_SYMBOL_GPL(most_deregister_interface);
 
@@ -1542,57 +1452,35 @@ void most_resume_enqueue(struct most_interface *iface, int id)
 }
 EXPORT_SYMBOL_GPL(most_resume_enqueue);
 
-static void release_most_sub(struct device *dev)
-{
-	pr_info("releasing most_subsystem\n");
-}
-
 static int __init most_init(void)
 {
 	int err;
 
-	pr_info("init()\n");
-	INIT_LIST_HEAD(&mc.comp_list);
+	INIT_LIST_HEAD(&comp_list);
 	ida_init(&mdev_id);
 
-	mc.bus.name = "most",
-	mc.bus.match = most_match,
-	mc.drv.name = "most_core",
-	mc.drv.bus = &mc.bus,
-	mc.drv.groups = mc_attr_groups;
-
-	err = bus_register(&mc.bus);
+	err = bus_register(&mostbus);
 	if (err) {
-		pr_info("Cannot register most bus\n");
+		pr_err("Failed to register most bus\n");
 		return err;
 	}
-	err = driver_register(&mc.drv);
+	err = driver_register(&mostbus_driver);
 	if (err) {
-		pr_info("Cannot register core driver\n");
-		goto exit_bus;
+		pr_err("Failed to register core driver\n");
+		goto err_unregister_bus;
 	}
-	mc.dev.init_name = "most_bus";
-	mc.dev.release = release_most_sub;
-	if (device_register(&mc.dev)) {
-		err = -ENOMEM;
-		goto exit_driver;
-	}
-
+	configfs_init();
 	return 0;
 
-exit_driver:
-	driver_unregister(&mc.drv);
-exit_bus:
-	bus_unregister(&mc.bus);
+err_unregister_bus:
+	bus_unregister(&mostbus);
 	return err;
 }
 
 static void __exit most_exit(void)
 {
-	pr_info("exit core module\n");
-	device_unregister(&mc.dev);
-	driver_unregister(&mc.drv);
-	bus_unregister(&mc.bus);
+	driver_unregister(&mostbus_driver);
+	bus_unregister(&mostbus);
 	ida_destroy(&mdev_id);
 }
 

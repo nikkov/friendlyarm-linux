@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* ADC MFD core driver for sunxi platforms
  *
  * Copyright (c) 2016 Quentin Schulz <quentin.schulz@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -57,6 +54,7 @@ static struct mfd_cell sun4i_gpadc_cells[] = {
 static struct mfd_cell sun5i_gpadc_cells[] = {
 	{
 		.name	= "sun5i-a13-gpadc-iio",
+		.of_compatible	= "allwinner,sun5i-a13-gpadc-iio",
 		.resources = adc_resources,
 		.num_resources = ARRAY_SIZE(adc_resources),
 	},

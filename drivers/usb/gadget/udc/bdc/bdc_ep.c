@@ -138,9 +138,9 @@ static int ep_bd_list_alloc(struct bdc_ep *ep)
 		__func__, ep, num_tabs);
 
 	/* Allocate memory for table array */
-	ep->bd_list.bd_table_array = kzalloc(
-					num_tabs * sizeof(struct bd_table *),
-					GFP_ATOMIC);
+	ep->bd_list.bd_table_array = kcalloc(num_tabs,
+					     sizeof(struct bd_table *),
+					     GFP_ATOMIC);
 	if (!ep->bd_list.bd_table_array)
 		return -ENOMEM;
 
@@ -151,7 +151,7 @@ static int ep_bd_list_alloc(struct bdc_ep *ep)
 		if (!bd_table)
 			goto fail;
 
-		bd_table->start_bd = dma_pool_alloc(bdc->bd_table_pool,
+		bd_table->start_bd = dma_pool_zalloc(bdc->bd_table_pool,
 							GFP_ATOMIC,
 							&dma);
 		if (!bd_table->start_bd) {
@@ -167,7 +167,6 @@ static int ep_bd_list_alloc(struct bdc_ep *ep)
 			(unsigned long long)bd_table->dma, prev_table);
 
 		ep->bd_list.bd_table_array[index] = bd_table;
-		memset(bd_table->start_bd, 0, bd_p_tab * sizeof(struct bdc_bd));
 		if (prev_table)
 			chain_table(prev_table, bd_table, bd_p_tab);
 
@@ -541,7 +540,7 @@ static void bdc_req_complete(struct bdc_ep *ep, struct bdc_req *req,
 {
 	struct bdc *bdc = ep->bdc;
 
-	if (req == NULL  || &req->queue == NULL || &req->usb_req == NULL)
+	if (req == NULL)
 		return;
 
 	dev_dbg(bdc->dev, "%s ep:%s status:%d\n", __func__, ep->name, status);

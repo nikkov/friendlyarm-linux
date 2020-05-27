@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2014-2017 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __BCMGENET_H__
@@ -16,6 +13,7 @@
 #include <linux/mii.h>
 #include <linux/if_vlan.h>
 #include <linux/phy.h>
+#include <linux/dim.h>
 
 /* total number of Buffer Descriptors, same for Rx/Tx */
 #define TOTAL_DESC				256
@@ -146,6 +144,8 @@ struct bcmgenet_mib_counters {
 	u32	alloc_rx_buff_failed;
 	u32	rx_dma_failed;
 	u32	tx_dma_failed;
+	u32	tx_realloc_tsb;
+	u32	tx_realloc_tsb_failed;
 };
 
 #define UMAC_HD_BKP_CTRL		0x004
@@ -184,6 +184,9 @@ struct bcmgenet_mib_counters {
 #define UMAC_MAC0			0x00C
 #define UMAC_MAC1			0x010
 #define UMAC_MAX_FRAME_LEN		0x014
+
+#define UMAC_MODE			0x44
+#define  MODE_LINK_STATUS		(1 << 5)
 
 #define UMAC_EEE_CTRL			0x064
 #define  EN_LPI_RX_PAUSE		(1 << 0)
@@ -250,6 +253,7 @@ struct bcmgenet_mib_counters {
 #define RBUF_CHK_CTRL			0x14
 #define  RBUF_RXCHK_EN			(1 << 0)
 #define  RBUF_SKIP_FCS			(1 << 4)
+#define  RBUF_L3_PARSE_DIS		(1 << 5)
 
 #define RBUF_ENERGY_CTRL		0x9c
 #define  RBUF_EEE_EN			(1 << 0)
@@ -269,6 +273,7 @@ struct bcmgenet_mib_counters {
 #define  RBUF_FLTR_LEN_SHIFT		8
 
 #define TBUF_CTRL			0x00
+#define  TBUF_64B_EN			(1 << 0)
 #define TBUF_BP_MC			0x0C
 #define TBUF_ENERGY_CTRL		0x14
 #define  TBUF_EEE_EN			(1 << 0)
@@ -365,6 +370,7 @@ struct bcmgenet_mib_counters {
 #define  EXT_PWR_DOWN_PHY_EN		(1 << 20)
 
 #define EXT_RGMII_OOB_CTRL		0x0C
+#define  RGMII_MODE_EN_V123		(1 << 0)
 #define  RGMII_LINK			(1 << 4)
 #define  OOB_DISABLE			(1 << 5)
 #define  RGMII_MODE_EN			(1 << 6)
@@ -572,6 +578,14 @@ struct bcmgenet_tx_ring {
 	struct bcmgenet_priv *priv;
 };
 
+struct bcmgenet_net_dim {
+	u16		use_dim;
+	u16		event_ctr;
+	unsigned long	packets;
+	unsigned long	bytes;
+	struct dim	dim;
+};
+
 struct bcmgenet_rx_ring {
 	struct napi_struct napi;	/* Rx NAPI struct */
 	unsigned long	bytes;
@@ -586,6 +600,9 @@ struct bcmgenet_rx_ring {
 	unsigned int	cb_ptr;		/* Rx ring initial CB ptr */
 	unsigned int	end_ptr;	/* Rx ring end CB ptr */
 	unsigned int	old_discards;
+	struct bcmgenet_net_dim dim;
+	u32		rx_max_coalesced_frames;
+	u32		rx_coalesce_usecs;
 	void (*int_enable)(struct bcmgenet_rx_ring *);
 	void (*int_disable)(struct bcmgenet_rx_ring *);
 	struct bcmgenet_priv *priv;
@@ -646,11 +663,9 @@ struct bcmgenet_priv {
 	unsigned int irq0_stat;
 
 	/* HW descriptors/checksum variables */
-	bool desc_64b_en;
-	bool desc_rxchk_en;
 	bool crc_fwd_en;
 
-	unsigned int dma_rx_chk_bit;
+	u32 dma_max_burst_length;
 
 	u32 msg_enable;
 

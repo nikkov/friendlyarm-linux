@@ -127,19 +127,11 @@ show_signal_msg(struct pt_regs *regs, int sig, int code,
 static void __do_fault_siginfo(int code, int sig, struct pt_regs *regs,
 			       unsigned long addr)
 {
-	siginfo_t info;
-
-	info.si_signo = sig;
-	info.si_code = code;
-	info.si_errno = 0;
-	info.si_addr = (void __user *) addr;
-	info.si_trapno = 0;
-
 	if (unlikely(show_unhandled_signals))
-		show_signal_msg(regs, sig, info.si_code,
+		show_signal_msg(regs, sig, code,
 				addr, current);
 
-	force_sig_info (sig, &info, current);
+	force_sig_fault(sig, code, (void __user *) addr, 0);
 }
 
 static unsigned long compute_si_addr(struct pt_regs *regs, int text_fault)
@@ -174,7 +166,8 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
 	unsigned int fixup;
 	unsigned long g2;
 	int from_user = !(regs->psr & PSR_PS);
-	int fault, code;
+	int code;
+	vm_fault_t fault;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	if (text_fault)
@@ -358,6 +351,8 @@ vmalloc_fault:
 		 */
 		int offset = pgd_index(address);
 		pgd_t *pgd, *pgd_k;
+		p4d_t *p4d, *p4d_k;
+		pud_t *pud, *pud_k;
 		pmd_t *pmd, *pmd_k;
 
 		pgd = tsk->active_mm->pgd + offset;
@@ -370,8 +365,13 @@ vmalloc_fault:
 			return;
 		}
 
-		pmd = pmd_offset(pgd, address);
-		pmd_k = pmd_offset(pgd_k, address);
+		p4d = p4d_offset(pgd, address);
+		pud = pud_offset(p4d, address);
+		pmd = pmd_offset(pud, address);
+
+		p4d_k = p4d_offset(pgd_k, address);
+		pud_k = pud_offset(p4d_k, address);
+		pmd_k = pmd_offset(pud_k, address);
 
 		if (pmd_present(*pmd) || !pmd_present(*pmd_k))
 			goto bad_area_nosemaphore;
@@ -432,7 +432,7 @@ do_sigbus:
 static void check_stack_aligned(unsigned long sp)
 {
 	if (sp & 0x7UL)
-		force_sig(SIGILL, current);
+		force_sig(SIGILL);
 }
 
 void window_overflow_fault(void)

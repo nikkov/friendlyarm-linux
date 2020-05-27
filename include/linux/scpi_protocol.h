@@ -1,19 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * SCPI Message Protocol driver header
  *
  * Copyright (C) 2014 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/types.h>
 
@@ -75,6 +64,7 @@ struct scpi_ops {
 	int (*sensor_get_value)(u16, u64 *);
 	int (*device_get_power_state)(u16);
 	int (*device_set_power_state)(u16, u8);
+	int (*sys_set_power_state)(u8);
 };
 
 #if IS_REACHABLE(CONFIG_ARM_SCPI_PROTOCOL)

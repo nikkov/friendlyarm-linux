@@ -1,19 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * GPIO driver for the ACCES 104-IDI-48 family
  * Copyright (C) 2015 William Breathitt Gray
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
  * This driver supports the following ACCES devices: 104-IDI-48A,
  * 104-IDI-48AC, 104-IDI-48B, and 104-IDI-48BC.
  */
+#include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/errno.h>
@@ -60,7 +53,7 @@ struct idi_48_gpio {
 
 static int idi_48_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 {
-	return 1;
+	return GPIO_LINE_DIRECTION_IN;
 }
 
 static int idi_48_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
@@ -72,7 +65,7 @@ static int idi_48_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	struct idi_48_gpio *const idi48gpio = gpiochip_get_data(chip);
 	unsigned i;
-	const unsigned register_offset[6] = { 0, 1, 2, 4, 5, 6 };
+	static const unsigned int register_offset[6] = { 0, 1, 2, 4, 5, 6 };
 	unsigned base_offset;
 	unsigned mask;
 
@@ -85,6 +78,29 @@ static int idi_48_gpio_get(struct gpio_chip *chip, unsigned offset)
 		}
 
 	/* The following line should never execute since offset < 48 */
+	return 0;
+}
+
+static int idi_48_gpio_get_multiple(struct gpio_chip *chip, unsigned long *mask,
+	unsigned long *bits)
+{
+	struct idi_48_gpio *const idi48gpio = gpiochip_get_data(chip);
+	unsigned long offset;
+	unsigned long gpio_mask;
+	static const size_t ports[] = { 0, 1, 2, 4, 5, 6 };
+	unsigned int port_addr;
+	unsigned long port_state;
+
+	/* clear bits array to a clean slate */
+	bitmap_zero(bits, chip->ngpio);
+
+	for_each_set_clump8(offset, gpio_mask, mask, ARRAY_SIZE(ports) * 8) {
+		port_addr = idi48gpio->base + ports[offset / 8];
+		port_state = inb(port_addr) & gpio_mask;
+
+		bitmap_set_value8(bits, port_state, offset);
+	}
+
 	return 0;
 }
 
@@ -256,6 +272,7 @@ static int idi_48_probe(struct device *dev, unsigned int id)
 	idi48gpio->chip.get_direction = idi_48_gpio_get_direction;
 	idi48gpio->chip.direction_input = idi_48_gpio_direction_input;
 	idi48gpio->chip.get = idi_48_gpio_get;
+	idi48gpio->chip.get_multiple = idi_48_gpio_get_multiple;
 	idi48gpio->base = base[id];
 
 	raw_spin_lock_init(&idi48gpio->lock);

@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2001 Lennert Buytenhek (buytenh@gnu.org)
  * Copyright (C) 2001 - 2008 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/console.h>
@@ -96,7 +96,6 @@ static irqreturn_t mconsole_interrupt(int irq, void *dev_id)
 	}
 	if (!list_empty(&mc_requests))
 		schedule_work(&mconsole_work);
-	reactivate_fd(fd, MCONSOLE_IRQ);
 	return IRQ_HANDLED;
 }
 
@@ -240,7 +239,6 @@ void mconsole_stop(struct mc_request *req)
 		(*req->cmd->handler)(req);
 	}
 	os_set_fd_block(req->originating_fd, 0);
-	reactivate_fd(req->originating_fd, MCONSOLE_IRQ);
 	mconsole_reply(req, "", 0, 0);
 }
 
@@ -754,10 +752,9 @@ static ssize_t mconsole_proc_write(struct file *file,
 	return count;
 }
 
-static const struct file_operations mconsole_proc_fops = {
-	.owner		= THIS_MODULE,
-	.write		= mconsole_proc_write,
-	.llseek		= noop_llseek,
+static const struct proc_ops mconsole_proc_ops = {
+	.proc_write	= mconsole_proc_write,
+	.proc_lseek	= noop_llseek,
 };
 
 static int create_proc_mconsole(void)
@@ -767,7 +764,7 @@ static int create_proc_mconsole(void)
 	if (notify_socket == NULL)
 		return 0;
 
-	ent = proc_create("mconsole", 0200, NULL, &mconsole_proc_fops);
+	ent = proc_create("mconsole", 0200, NULL, &mconsole_proc_ops);
 	if (ent == NULL) {
 		printk(KERN_INFO "create_proc_mconsole : proc_create failed\n");
 		return 0;

@@ -2,10 +2,29 @@
 #ifndef _ASM_POWERPC_BOOK3S_64_HASH_64K_H
 #define _ASM_POWERPC_BOOK3S_64_HASH_64K_H
 
-#define H_PTE_INDEX_SIZE  8
-#define H_PMD_INDEX_SIZE  10
-#define H_PUD_INDEX_SIZE  7
-#define H_PGD_INDEX_SIZE  8
+#define H_PTE_INDEX_SIZE   8  // size: 8B <<  8 = 2KB, maps 2^8  x 64KB = 16MB
+#define H_PMD_INDEX_SIZE  10  // size: 8B << 10 = 8KB, maps 2^10 x 16MB = 16GB
+#define H_PUD_INDEX_SIZE  10  // size: 8B << 10 = 8KB, maps 2^10 x 16GB = 16TB
+#define H_PGD_INDEX_SIZE   8  // size: 8B <<  8 = 2KB, maps 2^8  x 16TB =  4PB
+
+
+/*
+ * Each context is 512TB size. SLB miss for first context/default context
+ * is handled in the hotpath.
+ */
+#define MAX_EA_BITS_PER_CONTEXT		49
+#define REGION_SHIFT		MAX_EA_BITS_PER_CONTEXT
+
+/*
+ * We use one context for each MAP area.
+ */
+#define H_KERN_MAP_SIZE		(1UL << MAX_EA_BITS_PER_CONTEXT)
+
+/*
+ * Define the address range of the kernel non-linear virtual area
+ * 2PB
+ */
+#define H_KERN_VIRT_START	ASM_CONST(0xc008000000000000)
 
 /*
  * 64k aligned address free up few of the lower bits of RPN for us
@@ -16,6 +35,13 @@
 #define H_PAGE_BUSY	_RPAGE_RPN44     /* software: PTE & hash are busy */
 #define H_PAGE_HASHPTE	_RPAGE_RPN43	/* PTE has associated HPTE */
 
+/* memory key bits. */
+#define H_PTE_PKEY_BIT0	_RPAGE_RSV1
+#define H_PTE_PKEY_BIT1	_RPAGE_RSV2
+#define H_PTE_PKEY_BIT2	_RPAGE_RSV3
+#define H_PTE_PKEY_BIT3	_RPAGE_RSV4
+#define H_PTE_PKEY_BIT4	_RPAGE_RSV5
+
 /*
  * We need to differentiate between explicit huge page and THP huge
  * page, since THP huge page also need to track real subpage details
@@ -25,15 +51,20 @@
 /* PTE flags to conserve for HPTE identification */
 #define _PAGE_HPTEFLAGS (H_PAGE_BUSY | H_PAGE_HASHPTE | H_PAGE_COMBO)
 /*
- * we support 16 fragments per PTE page of 64K size.
- */
-#define H_PTE_FRAG_NR	16
-/*
  * We use a 2K PTE page fragment and another 2K for storing
  * real_pte_t hash index
+ * 8 bytes per each pte entry and another 8 bytes for storing
+ * slot details.
  */
-#define H_PTE_FRAG_SIZE_SHIFT  12
-#define PTE_FRAG_SIZE (1UL << PTE_FRAG_SIZE_SHIFT)
+#define H_PTE_FRAG_SIZE_SHIFT  (H_PTE_INDEX_SIZE + 3 + 1)
+#define H_PTE_FRAG_NR	(PAGE_SIZE >> H_PTE_FRAG_SIZE_SHIFT)
+
+#if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_HUGETLB_PAGE)
+#define H_PMD_FRAG_SIZE_SHIFT  (H_PMD_INDEX_SIZE + 3 + 1)
+#else
+#define H_PMD_FRAG_SIZE_SHIFT  (H_PMD_INDEX_SIZE + 3)
+#endif
+#define H_PMD_FRAG_NR	(PAGE_SIZE >> H_PMD_FRAG_SIZE_SHIFT)
 
 #ifndef __ASSEMBLY__
 #include <asm/errno.h>
@@ -119,10 +150,9 @@ extern bool __rpte_sub_valid(real_pte_t rpte, unsigned long index);
 		shift = mmu_psize_defs[psize].shift;			\
 		for (index = 0; vpn < __end; index++,			\
 			     vpn += (1L << (shift - VPN_SHIFT))) {	\
-			if (!__split || __rpte_sub_valid(rpte, index))	\
-				do {
+		if (!__split || __rpte_sub_valid(rpte, index))
 
-#define pte_iterate_hashed_end() } while(0); } } while(0)
+#define pte_iterate_hashed_end()  } } while(0)
 
 #define pte_pagesize_index(mm, addr, pte)	\
 	(((pte) & H_PAGE_COMBO)? MMU_PAGE_4K: MMU_PAGE_64K)
@@ -216,7 +246,7 @@ static inline void mark_hpte_slot_valid(unsigned char *hpte_slot_array,
  */
 static inline int hash__pmd_trans_huge(pmd_t pmd)
 {
-	return !!((pmd_val(pmd) & (_PAGE_PTE | H_PAGE_THP_HUGE)) ==
+	return !!((pmd_val(pmd) & (_PAGE_PTE | H_PAGE_THP_HUGE | _PAGE_DEVMAP)) ==
 		  (_PAGE_PTE | H_PAGE_THP_HUGE));
 }
 
@@ -242,6 +272,12 @@ extern pmd_t hash__pmdp_huge_get_and_clear(struct mm_struct *mm,
 				       unsigned long addr, pmd_t *pmdp);
 extern int hash__has_transparent_hugepage(void);
 #endif /*  CONFIG_TRANSPARENT_HUGEPAGE */
+
+static inline pmd_t hash__pmd_mkdevmap(pmd_t pmd)
+{
+	return __pmd(pmd_val(pmd) | (_PAGE_PTE | H_PAGE_THP_HUGE | _PAGE_DEVMAP));
+}
+
 #endif	/* __ASSEMBLY__ */
 
 #endif /* _ASM_POWERPC_BOOK3S_64_HASH_64K_H */

@@ -21,10 +21,6 @@
  *  -check if sysreq works
  */
 
-#if defined(CONFIG_SERIAL_ARC_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
-
 #include <linux/module.h>
 #include <linux/serial.h>
 #include <linux/console.h>
@@ -593,6 +589,11 @@ static int arc_serial_probe(struct platform_device *pdev)
 	if (dev_id < 0)
 		dev_id = 0;
 
+	if (dev_id >= ARRAY_SIZE(arc_uart_ports)) {
+		dev_err(&pdev->dev, "serial%d out of range\n", dev_id);
+		return -EINVAL;
+	}
+
 	uart = &arc_uart_ports[dev_id];
 	port = &uart->port;
 
@@ -620,6 +621,7 @@ static int arc_serial_probe(struct platform_device *pdev)
 	port->flags = UPF_BOOT_AUTOCONF;
 	port->line = dev_id;
 	port->ops = &arc_serial_pops;
+	port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_ARC_CONSOLE);
 
 	port->fifosize = ARC_UART_TX_FIFO_SIZE;
 

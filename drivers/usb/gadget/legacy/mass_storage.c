@@ -105,15 +105,12 @@ FSG_MODULE_PARAMETERS(/* no prefix */, mod_data);
 
 static int msg_do_config(struct usb_configuration *c)
 {
-	struct fsg_opts *opts;
 	int ret;
 
 	if (gadget_is_otg(c->cdev->gadget)) {
 		c->descriptors = otg_desc;
 		c->bmAttributes |= USB_CONFIG_ATT_WAKEUP;
 	}
-
-	opts = fsg_opts_from_func_inst(fi_msg);
 
 	f_msg = usb_get_function(fi_msg);
 	if (IS_ERR(f_msg))
@@ -225,7 +222,7 @@ static int msg_unbind(struct usb_composite_dev *cdev)
 static struct usb_composite_driver msg_driver = {
 	.name		= "g_mass_storage",
 	.dev		= &msg_device_desc,
-	.max_speed	= USB_SPEED_SUPER,
+	.max_speed	= USB_SPEED_SUPER_PLUS,
 	.needs_serial	= 1,
 	.strings	= dev_strings,
 	.bind		= msg_bind,

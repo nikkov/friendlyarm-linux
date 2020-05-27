@@ -28,9 +28,9 @@
  *    Christian König <christian.koenig@amd.com>
  */
 
-#include <drm/drmP.h>
 #include "amdgpu.h"
 #include "amdgpu_trace.h"
+#include "amdgpu_amdkfd.h"
 
 struct amdgpu_sync_entry {
 	struct hlist_node	node;
@@ -85,10 +85,19 @@ static bool amdgpu_sync_same_dev(struct amdgpu_device *adev,
  */
 static void *amdgpu_sync_get_owner(struct dma_fence *f)
 {
-	struct drm_sched_fence *s_fence = to_drm_sched_fence(f);
+	struct drm_sched_fence *s_fence;
+	struct amdgpu_amdkfd_fence *kfd_fence;
 
+	if (!f)
+		return AMDGPU_FENCE_OWNER_UNDEFINED;
+
+	s_fence = to_drm_sched_fence(f);
 	if (s_fence)
 		return s_fence->owner;
+
+	kfd_fence = to_amdgpu_amdkfd_fence(f);
+	if (kfd_fence)
+		return AMDGPU_FENCE_OWNER_KFD;
 
 	return AMDGPU_FENCE_OWNER_UNDEFINED;
 }
@@ -120,7 +129,8 @@ static void amdgpu_sync_keep_later(struct dma_fence **keep,
  * Tries to add the fence to an existing hash entry. Returns true when an entry
  * was found, false otherwise.
  */
-static bool amdgpu_sync_add_later(struct amdgpu_sync *sync, struct dma_fence *f, bool explicit)
+static bool amdgpu_sync_add_later(struct amdgpu_sync *sync, struct dma_fence *f,
+				  bool explicit)
 {
 	struct amdgpu_sync_entry *e;
 
@@ -142,19 +152,18 @@ static bool amdgpu_sync_add_later(struct amdgpu_sync *sync, struct dma_fence *f,
  * amdgpu_sync_fence - remember to sync to this fence
  *
  * @sync: sync object to add fence to
- * @fence: fence to sync to
+ * @f: fence to sync to
+ * @explicit: if this is an explicit dependency
  *
+ * Add the fence to the sync object.
  */
-int amdgpu_sync_fence(struct amdgpu_device *adev, struct amdgpu_sync *sync,
-		      struct dma_fence *f, bool explicit)
+int amdgpu_sync_fence(struct amdgpu_sync *sync, struct dma_fence *f,
+		      bool explicit)
 {
 	struct amdgpu_sync_entry *e;
 
 	if (!f)
 		return 0;
-	if (amdgpu_sync_same_dev(adev, f) &&
-	    amdgpu_sync_get_owner(f) == AMDGPU_FENCE_OWNER_VM)
-		amdgpu_sync_keep_later(&sync->last_vm_update, f);
 
 	if (amdgpu_sync_add_later(sync, f, explicit))
 		return 0;
@@ -171,6 +180,24 @@ int amdgpu_sync_fence(struct amdgpu_device *adev, struct amdgpu_sync *sync,
 }
 
 /**
+ * amdgpu_sync_vm_fence - remember to sync to this VM fence
+ *
+ * @adev: amdgpu device
+ * @sync: sync object to add fence to
+ * @fence: the VM fence to add
+ *
+ * Add the fence to the sync object and remember it as VM update.
+ */
+int amdgpu_sync_vm_fence(struct amdgpu_sync *sync, struct dma_fence *fence)
+{
+	if (!fence)
+		return 0;
+
+	amdgpu_sync_keep_later(&sync->last_vm_update, fence);
+	return amdgpu_sync_fence(sync, fence, false);
+}
+
+/**
  * amdgpu_sync_resv - sync to a reservation object
  *
  * @sync: sync object to add fences from reservation object to
@@ -181,10 +208,10 @@ int amdgpu_sync_fence(struct amdgpu_device *adev, struct amdgpu_sync *sync,
  */
 int amdgpu_sync_resv(struct amdgpu_device *adev,
 		     struct amdgpu_sync *sync,
-		     struct reservation_object *resv,
+		     struct dma_resv *resv,
 		     void *owner, bool explicit_sync)
 {
-	struct reservation_object_list *flist;
+	struct dma_resv_list *flist;
 	struct dma_fence *f;
 	void *fence_owner;
 	unsigned i;
@@ -194,25 +221,30 @@ int amdgpu_sync_resv(struct amdgpu_device *adev,
 		return -EINVAL;
 
 	/* always sync to the exclusive fence */
-	f = reservation_object_get_excl(resv);
-	r = amdgpu_sync_fence(adev, sync, f, false);
+	f = dma_resv_get_excl(resv);
+	r = amdgpu_sync_fence(sync, f, false);
 
-	flist = reservation_object_get_list(resv);
+	flist = dma_resv_get_list(resv);
 	if (!flist || r)
 		return r;
 
 	for (i = 0; i < flist->shared_count; ++i) {
 		f = rcu_dereference_protected(flist->shared[i],
-					      reservation_object_held(resv));
+					      dma_resv_held(resv));
+		/* We only want to trigger KFD eviction fences on
+		 * evict or move jobs. Skip KFD fences otherwise.
+		 */
+		fence_owner = amdgpu_sync_get_owner(f);
+		if (fence_owner == AMDGPU_FENCE_OWNER_KFD &&
+		    owner != AMDGPU_FENCE_OWNER_UNDEFINED)
+			continue;
+
 		if (amdgpu_sync_same_dev(adev, f)) {
-			/* VM updates are only interesting
-			 * for other VM updates and moves.
+			/* VM updates only sync with moves but not with user
+			 * command submissions or KFD evictions fences
 			 */
-			fence_owner = amdgpu_sync_get_owner(f);
-			if ((owner != AMDGPU_FENCE_OWNER_UNDEFINED) &&
-			    (fence_owner != AMDGPU_FENCE_OWNER_UNDEFINED) &&
-			    ((owner == AMDGPU_FENCE_OWNER_VM) !=
-			     (fence_owner == AMDGPU_FENCE_OWNER_VM)))
+			if (owner == AMDGPU_FENCE_OWNER_VM &&
+			    fence_owner != AMDGPU_FENCE_OWNER_UNDEFINED)
 				continue;
 
 			/* Ignore fence from the same owner and explicit one as
@@ -223,7 +255,7 @@ int amdgpu_sync_resv(struct amdgpu_device *adev,
 				continue;
 		}
 
-		r = amdgpu_sync_fence(adev, sync, f, false);
+		r = amdgpu_sync_fence(sync, f, false);
 		if (r)
 			break;
 	}
@@ -303,6 +335,41 @@ struct dma_fence *amdgpu_sync_get_fence(struct amdgpu_sync *sync, bool *explicit
 		dma_fence_put(f);
 	}
 	return NULL;
+}
+
+/**
+ * amdgpu_sync_clone - clone a sync object
+ *
+ * @source: sync object to clone
+ * @clone: pointer to destination sync object
+ *
+ * Adds references to all unsignaled fences in @source to @clone. Also
+ * removes signaled fences from @source while at it.
+ */
+int amdgpu_sync_clone(struct amdgpu_sync *source, struct amdgpu_sync *clone)
+{
+	struct amdgpu_sync_entry *e;
+	struct hlist_node *tmp;
+	struct dma_fence *f;
+	int i, r;
+
+	hash_for_each_safe(source->fences, i, tmp, e, node) {
+		f = e->fence;
+		if (!dma_fence_is_signaled(f)) {
+			r = amdgpu_sync_fence(clone, f, e->explicit);
+			if (r)
+				return r;
+		} else {
+			hash_del(&e->node);
+			dma_fence_put(f);
+			kmem_cache_free(amdgpu_sync_slab, e);
+		}
+	}
+
+	dma_fence_put(clone->last_vm_update);
+	clone->last_vm_update = dma_fence_get(source->last_vm_update);
+
+	return 0;
 }
 
 int amdgpu_sync_wait(struct amdgpu_sync *sync, bool intr)

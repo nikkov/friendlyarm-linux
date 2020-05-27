@@ -566,7 +566,7 @@ static int nvidiafb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		u8 *msk = (u8 *) cursor->mask;
 		u8 *src;
 
-		src = kmalloc(s_pitch * cursor->image.height, GFP_ATOMIC);
+		src = kmalloc_array(s_pitch, cursor->image.height, GFP_ATOMIC);
 
 		if (src) {
 			switch (cursor->rop) {
@@ -606,6 +606,8 @@ static int nvidiafb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 
 	return 0;
 }
+
+static struct fb_ops nvidia_fb_ops;
 
 static int nvidiafb_set_par(struct fb_info *info)
 {
@@ -660,19 +662,19 @@ static int nvidiafb_set_par(struct fb_info *info)
 	info->fix.line_length = (info->var.xres_virtual *
 				 info->var.bits_per_pixel) >> 3;
 	if (info->var.accel_flags) {
-		info->fbops->fb_imageblit = nvidiafb_imageblit;
-		info->fbops->fb_fillrect = nvidiafb_fillrect;
-		info->fbops->fb_copyarea = nvidiafb_copyarea;
-		info->fbops->fb_sync = nvidiafb_sync;
+		nvidia_fb_ops.fb_imageblit = nvidiafb_imageblit;
+		nvidia_fb_ops.fb_fillrect = nvidiafb_fillrect;
+		nvidia_fb_ops.fb_copyarea = nvidiafb_copyarea;
+		nvidia_fb_ops.fb_sync = nvidiafb_sync;
 		info->pixmap.scan_align = 4;
 		info->flags &= ~FBINFO_HWACCEL_DISABLED;
 		info->flags |= FBINFO_READS_FAST;
 		NVResetGraphics(info);
 	} else {
-		info->fbops->fb_imageblit = cfb_imageblit;
-		info->fbops->fb_fillrect = cfb_fillrect;
-		info->fbops->fb_copyarea = cfb_copyarea;
-		info->fbops->fb_sync = NULL;
+		nvidia_fb_ops.fb_imageblit = cfb_imageblit;
+		nvidia_fb_ops.fb_fillrect = cfb_fillrect;
+		nvidia_fb_ops.fb_copyarea = cfb_copyarea;
+		nvidia_fb_ops.fb_sync = NULL;
 		info->pixmap.scan_align = 1;
 		info->flags |= FBINFO_HWACCEL_DISABLED;
 		info->flags &= ~FBINFO_READS_FAST;
@@ -1165,7 +1167,7 @@ static int nvidia_set_fbinfo(struct fb_info *info)
 	info->pixmap.flags = FB_PIXMAP_SYSTEM;
 
 	if (!hwcur)
-	    info->fbops->fb_cursor = NULL;
+	    nvidia_fb_ops.fb_cursor = NULL;
 
 	info->var.accel_flags = (!noaccel);
 
@@ -1548,7 +1550,7 @@ MODULE_PARM_DESC(noaccel,
 		 "(default=0)");
 module_param(noscale, int, 0);
 MODULE_PARM_DESC(noscale,
-		 "Disables screen scaleing. (0 or 1=disable) "
+		 "Disables screen scaling. (0 or 1=disable) "
 		 "(default=0, do scaling)");
 module_param(paneltweak, int, 0);
 MODULE_PARM_DESC(paneltweak,
